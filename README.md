@@ -2,7 +2,7 @@ An astronomical observation task trigger tool for automatically generating obser
 
 ## Features
 
-Kinder Trigger is a tool designed specifically for astronomical observations that can:
+Kinder Trigger tool is designed specifically for astronomical observations that can:
 
 - Read observation targets from a JSON configuration file
 - Automatically generate observation scripts and commands
@@ -164,7 +164,7 @@ The observation planning tool is developed based on the original code [obsplanni
 Kinder_Trigger/
 ├── Trigger.py           # Main program
 ├── Trigger_LOT_SLT.py   # Generate the telescope script (ACP)
-├── obsplan.py       # Observation planning module (By Phil Cigan on github https://github.com/pjcigan/obsplanning)
+├── obsplan.py           # Observation planning module (By Phil Cigan on github https://github.com/pjcigan/obsplanning)
 ├── requirements.txt     # List of dependencies
 ├── .env                 # Environment variable configuration (Set the slack bot token and channel id)
 ├── Trigger.json         # Observation target configuration
