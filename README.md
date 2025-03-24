@@ -29,7 +29,7 @@ conda install --file requirements.txt
 Note: Some packages like `slack-sdk` and `python-dotenv` may need to be installed via pip even in a conda environment:
 
 ```bash
-pip install slack-sdk python-dotenv
+pip install slack-sdk python-dotenv timezonefinder
 ```
 
 ### Environment Variables
