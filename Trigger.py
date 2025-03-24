@@ -7,32 +7,87 @@ json_file = "Trigger.json"       # JSON file name
 # Use True to send to the control room, please be very careful!!
 send_to_control_room = False     # True: send to control room, False: only generate message
 # ===========================================================================
-'''Required JSON format:
--------------------
+'''
+Create a Trigger.json file with the following format:
+
+```json
 [
   {
-    "object name": "SN2024afav",    // Target name
-    "RA": "12:49:12.05",            // Right Ascension (HH:MM:SS.SS)
-    "Dec": "-18:06:12.56",          // Declination (±DD:MM:SS.SS)
-    "Mag": 17.11,                   // Magnitude (float or integer)
-    "Priority": "None",             // Priority level (None, First, Top, etc.)
-    "Exp_By_Mag": "True",           // Whether to calculate exposure time by magnitude
-    "Filter": "",                   // Filter to use (required when Exp_By_Mag is False)
-    "Exp_Time": "",                 // Exposure time in seconds (required when Exp_By_Mag is False)
-    "Num_of_Frame": ""              // Number of frames (required when Exp_By_Mag is False)
-  },
-  {
-    "object name": "EP250321a",     // Example with manual exposure settings
-    "RA": "11:57:03.02",
-    "Dec": "+17:21:45.94",
-    "Mag": 22,
-    "Priority": "First", 
-    "Exp_By_Mag": "False",          // Using manual exposure settings
-    "Filter": "rp, gp",                 // Filter: up, gp, rp, ip, or zp
-    "Exp_Time": "300, 300",              // Exposure time: 300 seconds
-    "Num_of_Frame": "12, 12"            // Number of frames: 12
+    "object name": "",
+    "RA": "",
+    "Dec": "",
+    "Mag": ,
+    "Priority": "",
+    "Exp_By_Mag": "",
+    "Filter": "",
+    "Exp_Time": "",
+    "Num_of_Frame": ""
   }
-]'''
+]
+```
+
+### Parameter Explanation
+
+- **object name**: Target celestial body name
+- **RA**: Right Ascension (hours:minutes:seconds)
+- **Dec**: Declination (degrees:minutes:seconds)
+- **Mag**: Magnitude
+- **Priority**: Priority level (None, First, Top or Higher)
+- **Exp_By_Mag**: Whether to automatically calculate exposure time based on magnitude
+- **Filter**: Filters to use, e.g., up, gp, rp, ip, zp (required when Exp_By_Mag is False)
+- **Exp_Time**: Exposure time in seconds (required when Exp_By_Mag is False)
+- **Num_of_Frame**: Number of exposures (required when Exp_By_Mag is False)
+
+### JSON Examples
+
+#### Example 1: Automatic Exposure Time Based on Magnitude
+
+```json
+{
+    "object name": "SN 2024ggi",
+    "RA": "11:18:22.087",
+    "Dec": "-32:50:15.27",
+    "Mag": 19.20,
+    "Priority": "None",
+    "Exp_By_Mag": "True",
+    "Filter": "",
+    "Exp_Time": "",
+    "Num_of_Frame": ""
+}
+```
+
+#### Example 2: Manual Exposure Settings with Multiple Filters
+
+```json
+{
+    "object name": "SN 2024ggi",
+    "RA": "11:18:22.087",
+    "Dec": "-32:50:15.27",
+    "Mag": 19.20,
+    "Priority": "None",
+    "Exp_By_Mag": "False",
+    "Filter": "gp, rp",
+    "Exp_Time": "300, 300",
+    "Num_of_Frame": "12, 12"
+}
+```
+
+#### Example 3: High Priority Target
+
+```json
+{
+  "object name": "M31",
+  "RA": "00:42:44.3",
+  "Dec": "+41:16:09",
+  "Mag": 3.4,
+  "Priority": "Top",
+  "Exp_By_Mag": "False",
+  "Filter": "up, gp, rp, ip",
+  "Exp_Time": "60, 30, 30, 30",
+  "Num_of_Frame": "5, 5, 5, 5"
+}
+```
+'''
 
 
 
@@ -49,7 +104,7 @@ import dotenv
 from datetime import datetime, timedelta
 
 # Obsplan
-import new_obsplan as obs
+import obsplan as obs
 import matplotlib
 matplotlib.use('Agg')
 

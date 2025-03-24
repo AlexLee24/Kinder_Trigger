@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 # Obsplan
 #import obsplanning as obs
-import new_obsplan as obs
+import obsplan as obs
 import ephem
 import matplotlib
 matplotlib.use('Agg')
