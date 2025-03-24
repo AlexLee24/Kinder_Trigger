@@ -176,3 +176,6 @@ cython_debug/
 # Local configuration file
 obs_img/
 .DS_Store
+.DS_Store/
+/.DS_Store
+*.DS_Store
