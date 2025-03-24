@@ -200,6 +200,8 @@ for obj in data:
 img_path = tri.generate_img(current_day, target_list)
 final_message = slack_message + script + "```"
 #final_message += "\n\n" + message
+print()
+print()
 print(final_message)
 
 if send_to_control_room is True:
