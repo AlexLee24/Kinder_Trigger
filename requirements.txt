@@ -1,0 +1,20 @@
+# Core astronomical packages
+pyephem>=4.1.0
+pytz>=2023.3
+numpy>=1.22.0
+timezonefinder>=6.0.0
+
+# Plotting
+matplotlib>=3.5.0
+
+# Slack integration
+slack-sdk>=3.19.0
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# To install with pip, use: pip install -r requirements.txt
+# To install with conda, use: conda install --file requirements.txt
+# Some packages might need to be installed with pip even in a conda environment
+# pip install slack-sdk
+# pip install timezonefinder

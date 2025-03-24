@@ -1,0 +1,13 @@
+[
+    {
+      "object name": "NAME",
+      "RA": "11:22:33.45",
+      "Dec": "+11:22:33.45",
+      "Mag": 19.20,
+      "Priority": "None",
+      "Exp_By_Mag": "True",
+      "Filter": "",
+      "Exp_Time": "",
+      "Num_of_Frame": ""
+    }
+  ]
