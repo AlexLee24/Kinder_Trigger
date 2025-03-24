@@ -175,6 +175,7 @@ cython_debug/
 
 # Local configuration file
 obs_img/
+Trigger.json
 .DS_Store
 .DS_Store/
 /.DS_Store
