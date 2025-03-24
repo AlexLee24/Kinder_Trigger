@@ -88,7 +88,7 @@ Create a Trigger.json file with the following format:
 - **Filter**: Filters to use, e.g., up, gp, rp, ip, zp (required when Exp_By_Mag is False)
 - **Exp_Time**: Exposure time in seconds (required when Exp_By_Mag is False)
 - **Num_of_Frame**: Number of exposures (required when Exp_By_Mag is False)
-- **Repeat**: Repeat the plan (required when Exp_By_Mag is False) (Set "0" for no Repeat)
+- **Repeat**: Repeat the plan (required when Exp_By_Mag is False) (Set "0" for no repeat, set "999" for unlimit repeat)
 
 ### JSON Examples
 
