@@ -207,7 +207,3 @@ if send_to_control_room is True:
     if correct == "y":
         send_slack_message(final_message, img_path, channel_id_control_room)
         print("Send message to control room")
-else:
-    a = 1
-    #send_slack_message(slack_message, img_path, channel_id_test)   # channel_id_control_room, channel_id_test
-
