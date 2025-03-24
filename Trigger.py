@@ -7,11 +7,11 @@ try:
         json_data = json.load(f)
     
     if "settings" in json_data:
-        IS_LOT = json_data["settings"].get("IS_LOT", False)  # True: LOT, False: SLT
+        IS_LOT = json_data["settings"].get("IS_LOT")  # True: LOT, False: SLT
         send_to_control_room = json_data["settings"].get("send_to_control_room", False)  # True: send to control room
         
     else:
-        IS_LOT = False 
+        IS_LOT = "False" 
         send_to_control_room = False
     
     if "targets" in json_data:
@@ -29,7 +29,7 @@ print(f"IS_LOT: {IS_LOT}")
 print(f"send_to_control_room: {send_to_control_room}")
 print("=====================")
 check = input("Do you want to continue? (y/n): ")
-if check != "y":
+if check.lower() not in ["y", ""]:
     exit()
 # ===========================================================================
 '''
@@ -217,17 +217,14 @@ for obj in data:
     target = obs.create_ephem_target(object_name_show, ra, dec)
     target_list.append(target)
 
-    # generate message and script
+    # generate script
     if exp_by_mag == "True":
         script += tri.generate_script(object_name, ra, dec, Mag, Priority, IS_LOT, Repeat, auto_exp=True)
-        #message += tri.generate_message(object_name, ra, dec, Mag, Priority, IS_LOT, auto_exp=True)
     else:
         script += tri.generate_script(object_name, ra, dec, Mag, Priority, IS_LOT, Repeat, auto_exp=False, filter_input=filter_val, exp_time=exp_time, count=count)
-        #message += tri.generate_message(object_name, ra, dec, Mag, Priority, IS_LOT, auto_exp=False, filter_input=filter_val, exp_time=exp_time, count=count)
 
 img_path = tri.generate_img(current_day, target_list)
 final_message = slack_message + script + "```"
-#final_message += "\n\n" + message
 print("=====================")
 print(final_message)
 print("=====================")

@@ -74,78 +74,10 @@ def check_filter_LOT(filter):
         return "zp_Astrodon_2019"
 
 
-# Generate Trigger Message
-def generate_message(name, ra, dec, mag, priority, is_lot=False, auto_exp=True, filter_input=None, exp_time=None, count=None):
-    telescope = "LOT" if is_lot else "SLT"
-    
-    if auto_exp:
-        exposure_times = exposure_time(mag)
-        if exposure_times == "Invalid magnitude":
-            return "Invalid magnitude entered."
-        elif exposure_times == "Too faint to observe":
-            return "Too faint to observe."
-        else:
-            all_filters = ""
-            all_exp_times = ""
-            for filters, time in exposure_times.items():
-                all_filters += f"{filters},"
-                all_exp_times += f"{filters}={time},"
-            all_filters = all_filters[:-1]
-            all_exp_times = all_exp_times[:-1]
-    else:
-        try:
-            if "," in filter_input or "," in exp_time or "," in count:
-                filter_list = [f.strip() for f in filter_input.split(",")]
-                exp_time_list = [e.strip() for e in exp_time.split(",")]
-                count_list = [c.strip() for c in count.split(",")]
-                
-                min_length = min(len(filter_list), len(exp_time_list), len(count_list))
-                filter_list = filter_list[:min_length]
-                exp_time_list = exp_time_list[:min_length]
-                count_list = count_list[:min_length]
-                
-                all_filters = ", ".join(filter_list)
-                
-                all_exp_times = ""
-                for i in range(min_length):
-                    all_exp_times += f"{filter_list[i]}={exp_time_list[i]}sec*{count_list[i]}, "
-                all_exp_times = all_exp_times[:-2]
-            else:
-                all_filters = filter_input
-                count_value = int(count) if count else 1
-                if count_value > 1:
-                    all_exp_times = f"{filter_input}={exp_time}sec*{count}"
-                else:
-                    all_exp_times = f"{filter_input}={exp_time}sec*1"
-                
-        except Exception as e:
-            print(f"Error processing filters and exposures in message: {e}")
-            all_filters = filter_input
-            all_exp_times = f"{filter_input}={exp_time}sec*{count}"
-    
-    if priority == "None":
-        message = (f"== {telescope} ===\n"
-                   f"Object: {name}\n"
-                   f"RA: {ra}\n"
-                   f"Dec: {dec}\n"
-                   f"Filter: {all_filters}\n"
-                   f"Exposure Time: {all_exp_times}\n"
-                   f"Mag: {mag} mag\n\n")
-    else:
-        message = (f"== {telescope} === {priority} Priority ===\n"
-                   f"Object: {name}\n"
-                   f"RA: {ra}\n"
-                   f"Dec: {dec}\n"
-                   f"Filter: {all_filters}\n"
-                   f"Exposure Time: {all_exp_times}\n"
-                   f"Mag: {mag} mag\n\n")
-    return message
-
-
 # Generate Trigger Script
-def generate_script(name, ra, dec, mag, priority, is_lot=False, Repeat=0, auto_exp=True, filter_input=None, exp_time=None, count=None):
+def generate_script(name, ra, dec, mag, priority, is_lot="False", Repeat=0, auto_exp=True, filter_input=None, exp_time=None, count=None):
     telescope = "LOT" if is_lot == "True" else "SLT"
-    
+    print(f"Telescope: {telescope}")
     if auto_exp:
         exposure_times = exposure_time(mag)
         if exposure_times == "Invalid magnitude":
@@ -158,9 +90,9 @@ def generate_script(name, ra, dec, mag, priority, is_lot=False, Repeat=0, auto_e
             all_exp_times = ""
             all_count = ""
             for filter_name, time in exposure_times.items():
-                if is_lot:
+                if telescope == "LOT":
                     full_filter_name = check_filter_LOT(filter_name)
-                else:
+                elif telescope == "SLT":
                     full_filter_name = check_filter(filter_name)
                 part = time.split("sec*")
                 time_val = part[0]
@@ -188,9 +120,9 @@ def generate_script(name, ra, dec, mag, priority, is_lot=False, Repeat=0, auto_e
             
             all_filters = []
             for f in filter_list:
-                if is_lot:
+                if telescope == "LOT":
                     all_filters.append(check_filter_LOT(f))
-                else:
+                elif telescope == "SLT":
                     all_filters.append(check_filter(f))
             all_filters = ", ".join(all_filters)
             
@@ -199,9 +131,9 @@ def generate_script(name, ra, dec, mag, priority, is_lot=False, Repeat=0, auto_e
             
         except Exception as e:
             print(f"Error processing filters and exposures: {e}")
-            if is_lot:
+            if telescope == "LOT":
                 full_filter_name = check_filter_LOT(filter_input)
-            else:
+            elif telescope == "SLT":
                 full_filter_name = check_filter(filter_input)
                 
             all_bins = "1"
