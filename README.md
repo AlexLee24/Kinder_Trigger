@@ -137,6 +137,10 @@ Set `send_to_control_room` to `True` in Trigger.py, and the system will ask for 
 python Trigger.py
 ```
 
+After execution, you'll see a Message that can be directly copied and pasted into a Slack channel. Use command + shift + F to convert the format to markdown.
+
+The Object visibility plot will be generated in the obs_img folder.
+
 ## Important Notes
 
 - Triple-check the accuracy of the observation plan before using `send_to_control_room = True`
