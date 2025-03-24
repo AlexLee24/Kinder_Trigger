@@ -48,22 +48,36 @@ SLACK_CHANNEL_ID_CONTROL_ROOM=control_room_channel_id
 Create a Trigger.json file with the following format:
 
 ```json
-[
+{
+  "settings": 
   {
-    "object name": "",
-    "RA": "",
-    "Dec": "",
-    "Mag": ,
-    "Priority": "",
-    "Exp_By_Mag": "",
-    "Filter": "",
-    "Exp_Time": "",
-    "Num_of_Frame": ""
-  }
-]
+    "IS_LOT": false,
+    "send_to_control_room": false
+  },
+
+  "targets": 
+  [
+    {
+      "object name": "",
+      "RA": "",
+      "Dec": "",
+      "Mag": ,
+      "Priority": "",
+      "Exp_By_Mag": "",
+      "Filter": "",
+      "Exp_Time": "",
+      "Num_of_Frame": "",
+      "Repeat": 
+    }
+  ]
+}
 ```
 
 ### Parameter Explanation
+
+- **IS_LOT**: Set True to generate LOT script, set to False for SLT
+- **send_to_control_room**: Set to True will send script to the control room
+
 
 - **object name**: Target celestial body name
 - **RA**: Right Ascension (hours:minutes:seconds)
@@ -74,6 +88,7 @@ Create a Trigger.json file with the following format:
 - **Filter**: Filters to use, e.g., up, gp, rp, ip, zp (required when Exp_By_Mag is False)
 - **Exp_Time**: Exposure time in seconds (required when Exp_By_Mag is False)
 - **Num_of_Frame**: Number of exposures (required when Exp_By_Mag is False)
+- **Repeat**: Repeat the plan (required when Exp_By_Mag is False) (Set "0" for no Repeat)
 
 ### JSON Examples
 
@@ -89,7 +104,8 @@ Create a Trigger.json file with the following format:
     "Exp_By_Mag": "True",
     "Filter": "",
     "Exp_Time": "",
-    "Num_of_Frame": ""
+    "Num_of_Frame": "",
+    "Repeat": 0
 }
 ```
 
@@ -105,7 +121,8 @@ Create a Trigger.json file with the following format:
     "Exp_By_Mag": "False",
     "Filter": "gp, rp",
     "Exp_Time": "300, 300",
-    "Num_of_Frame": "12, 12"
+    "Num_of_Frame": "12, 12",
+    "Repeat": 0
 }
 ```
 
@@ -121,17 +138,29 @@ Create a Trigger.json file with the following format:
   "Exp_By_Mag": "False",
   "Filter": "up, gp, rp, ip",
   "Exp_Time": "60, 30, 30, 30",
-  "Num_of_Frame": "5, 5, 5, 5"
+  "Num_of_Frame": "5, 5, 5, 5",
+  "Repeat": 0
+}
+```
+
+#### Example 4: High Priority Target with repeat 10 times
+
+```json
+{
+  "object name": "M31",
+  "RA": "00:42:44.3",
+  "Dec": "+41:16:09",
+  "Mag": 3.4,
+  "Priority": "Top",
+  "Exp_By_Mag": "False",
+  "Filter": "up, gp, rp, ip",
+  "Exp_Time": "60, 30, 30, 30",
+  "Num_of_Frame": "5, 5, 5, 5",
+  "Repeat": 10
 }
 ```
 
 ### Running the Observation Plan
-
-Before running the Trigger.py, need to change the setting in the python file.
-
-Set `IS_LOT` to `True` in Trigger.py, to generate the LOT script, set to `False` for SLT.
-
-Set `send_to_control_room` to `True` in Trigger.py, and the system will ask for confirmation before sending the observation plan to the control room.
 
 ```bash
 python Trigger.py

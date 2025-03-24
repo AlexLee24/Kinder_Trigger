@@ -143,8 +143,8 @@ def generate_message(name, ra, dec, mag, priority, is_lot=False, auto_exp=True, 
 
 
 # Generate Trigger Script
-def generate_script(name, ra, dec, mag, priority, is_lot=False, auto_exp=True, filter_input=None, exp_time=None, count=None):
-    telescope = "LOT" if is_lot else "SLT"
+def generate_script(name, ra, dec, mag, priority, is_lot=False, Repeat=0, auto_exp=True, filter_input=None, exp_time=None, count=None):
+    telescope = "LOT" if is_lot == "True" else "SLT"
     
     if auto_exp:
         exposure_times = exposure_time(mag)
@@ -211,23 +211,45 @@ def generate_script(name, ra, dec, mag, priority, is_lot=False, auto_exp=True, f
     
     # ACP Script
     if priority == "None":
-        script = (f";==={telescope}===\n\n"
-                  f"#BINNING {all_bins}\n"
-                  f"#FILTER {all_filters}\n"
-                  f"#INTERVAL {all_exp_times}\n"
-                  f"#COUNT {all_count}\n"
-                  f";# mag: {mag} mag\n"
-                  f"{name}\t{ra}\t{dec}\n"
-                  f"#WAITFOR 1\n\n\n")
+        if Repeat > 0:
+            script = (f";==={telescope}===\n\n"
+                    f"#BINNING {all_bins}\n"
+                    f"#FILTER {all_filters}\n"
+                    f"#INTERVAL {all_exp_times}\n"
+                    f"#COUNT {all_count}\n"
+                    f";# mag: {mag} mag\n"
+                    f"#REPEAT {Repeat}\n"
+                    f"{name}\t{ra}\t{dec}\n"
+                    f"#WAITFOR 1\n\n\n")
+        else:
+            script = (f";==={telescope}===\n\n"
+                    f"#BINNING {all_bins}\n"
+                    f"#FILTER {all_filters}\n"
+                    f"#INTERVAL {all_exp_times}\n"
+                    f"#COUNT {all_count}\n"
+                    f";# mag: {mag} mag\n"
+                    f"{name}\t{ra}\t{dec}\n"
+                    f"#WAITFOR 1\n\n\n")
     else:
-        script = (f";==={telescope}_{priority}_priority===\n\n"
-                  f"#BINNING {all_bins}\n"
-                  f"#FILTER {all_filters}\n"
-                  f"#INTERVAL {all_exp_times}\n"
-                  f"#COUNT {all_count}\n"
-                  f";# mag: {mag} mag\n"
-                  f"{name}\t{ra}\t{dec}\n"
-                  f"#WAITFOR 1\n\n\n")
+        if Repeat > 0:
+            script = (f";==={telescope}_{priority}_priority===\n\n"
+                    f"#BINNING {all_bins}\n"
+                    f"#FILTER {all_filters}\n"
+                    f"#INTERVAL {all_exp_times}\n"
+                    f"#COUNT {all_count}\n"
+                    f";# mag: {mag} mag\n"
+                    f"#REPEAT {Repeat}\n"
+                    f"{name}\t{ra}\t{dec}\n"
+                    f"#WAITFOR 1\n\n\n")
+        else:
+            script = (f";==={telescope}_{priority}_priority===\n\n"
+                    f"#BINNING {all_bins}\n"
+                    f"#FILTER {all_filters}\n"
+                    f"#INTERVAL {all_exp_times}\n"
+                    f"#COUNT {all_count}\n"
+                    f";# mag: {mag} mag\n"
+                    f"{name}\t{ra}\t{dec}\n"
+                    f"#WAITFOR 1\n\n\n")
     return script
 
 

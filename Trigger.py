@@ -1,11 +1,36 @@
+import json
 # ========================= Setting =========================================
-IS_LOT = False                   # True: LOT, False: SLT
 json_file = "Trigger.json"       # JSON file name
-# ===========================================================================
-# ========================= Slack Setting ====================================
-# 使用True會傳送到控制室，請非常注意！！
-# Use True to send to the control room, please be very careful!!
-send_to_control_room = False     # True: send to control room, False: only generate message
+
+try:
+    with open(json_file, "r", encoding="utf-8") as f:
+        json_data = json.load(f)
+    
+    if "settings" in json_data:
+        IS_LOT = json_data["settings"].get("IS_LOT", False)  # True: LOT, False: SLT
+        send_to_control_room = json_data["settings"].get("send_to_control_room", False)  # True: send to control room
+        
+    else:
+        IS_LOT = False 
+        send_to_control_room = False
+    
+    if "targets" in json_data:
+        data = json_data["targets"]
+    else:
+        data = json_data
+except Exception as e:
+    print(f"Error: {e}")
+    IS_LOT = False  
+    send_to_control_room = False  
+    data = []
+
+print("====== Setting ======")
+print(f"IS_LOT: {IS_LOT}")
+print(f"send_to_control_room: {send_to_control_room}")
+print("=====================")
+check = input("Do you want to continue? (y/n): ")
+if check != "y":
+    exit()
 # ===========================================================================
 '''
 Create a Trigger.json file with the following format:
@@ -120,7 +145,7 @@ path_now = os.getcwd()
 obs_img_dir = os.path.join(path_now, "obs_img")
 plot_path = os.path.join(path_now, obs_img_dir, "Trigger_observing_tracks.jpg")
 # ========================= Slack Setting (BOT) =============================
-if send_to_control_room is True:
+if send_to_control_room == "True":
     SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")
     channel_id_control_room = os.getenv("SLACK_CHANNEL_ID_CONTROL_ROOM")
     if not SLACK_BOT_TOKEN or not channel_id_control_room:
@@ -137,8 +162,12 @@ if send_to_control_room is True:
 # read json file
 def read_json(file):
     with open(file, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    return data
+        json_data = json.load(f)
+    
+    if "targets" in json_data:
+        return json_data["targets"]
+    else:
+        return json_data
 
 # send slack message
 def send_slack_message(message, file_path, channel_id):
@@ -181,6 +210,7 @@ for obj in data:
     filter_val = obj["Filter"]
     exp_time = obj["Exp_Time"]
     count = obj["Num_of_Frame"]
+    Repeat = obj["Repeat"]
     
     # generate image
     object_name_show = f"{object_name}"
@@ -189,23 +219,24 @@ for obj in data:
 
     # generate message and script
     if exp_by_mag == "True":
-        script += tri.generate_script(object_name, ra, dec, Mag, Priority, IS_LOT, auto_exp=True)
-        message += tri.generate_message(object_name, ra, dec, Mag, Priority, IS_LOT, auto_exp=True)
+        script += tri.generate_script(object_name, ra, dec, Mag, Priority, IS_LOT, Repeat, auto_exp=True)
+        #message += tri.generate_message(object_name, ra, dec, Mag, Priority, IS_LOT, auto_exp=True)
     else:
-        script += tri.generate_script(object_name, ra, dec, Mag, Priority, IS_LOT, auto_exp=False, 
-                                    filter_input=filter_val, exp_time=exp_time, count=count)
-        message += tri.generate_message(object_name, ra, dec, Mag, Priority, IS_LOT, auto_exp=False, 
-                            filter_input=filter_val, exp_time=exp_time, count=count)
+        script += tri.generate_script(object_name, ra, dec, Mag, Priority, IS_LOT, Repeat, auto_exp=False, filter_input=filter_val, exp_time=exp_time, count=count)
+        #message += tri.generate_message(object_name, ra, dec, Mag, Priority, IS_LOT, auto_exp=False, filter_input=filter_val, exp_time=exp_time, count=count)
 
 img_path = tri.generate_img(current_day, target_list)
 final_message = slack_message + script + "```"
 #final_message += "\n\n" + message
-print()
-print()
+print("=====================")
 print(final_message)
+print("=====================")
 
-if send_to_control_room is True:
-    correct = input("Do you really want to send this trigger to contro; room?(y/n): ")
-    if correct == "y":
+if send_to_control_room == "True":
+    check2 = input("Do you really want to send this trigger to contro; room?(y/n): ")
+    if check2 == "y":
         send_slack_message(final_message, img_path, channel_id_control_room)
         print("Send message to control room")
+    else:
+        print("Did not send message to control room")
+        exit()
