@@ -192,7 +192,7 @@ def generate_img(date, target_list, plot_path=None):
         obs_img_dir = os.path.join(path_now, "obs_img")
         if not os.path.exists(obs_img_dir):
             os.makedirs(obs_img_dir)
-            print(f"已建立資料夾：{obs_img_dir}")
+            print(f"Create folder: {obs_img_dir}")
         plot_path = os.path.join(obs_img_dir, "Trigger_observing_tracks.jpg")
     
     lulin_obs = obs.create_ephem_observer('Lulin Observatory', '120:52:21.5', '23:28:10.0', 2800)

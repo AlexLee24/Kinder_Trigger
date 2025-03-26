@@ -193,8 +193,7 @@ slack_message = (
     "您好，若天氣允許，以下是今日的觀測目標:\n"
     "If the weather permits, here are today's observation targets:\n"
 )
-message = "old version:\n"
-script = "scipt:\n```\n"
+script = "script:\n```\n"
 data = read_json(json_file)
 now = datetime.now()
 current_day = now.strftime("%Y-%m-%d")
