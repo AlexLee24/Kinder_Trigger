@@ -145,12 +145,12 @@ def generate_script(name, ra, dec, mag, priority, is_lot="False", Repeat=0, auto
     if priority == "None":
         if Repeat > 0:
             script = (f";==={telescope}===\n\n"
+                    f"#REPEAT {Repeat}\n"
                     f"#BINNING {all_bins}\n"
                     f"#FILTER {all_filters}\n"
                     f"#INTERVAL {all_exp_times}\n"
                     f"#COUNT {all_count}\n"
                     f";# mag: {mag} mag\n"
-                    f"#REPEAT {Repeat}\n"
                     f"{name}\t{ra}\t{dec}\n"
                     f"#WAITFOR 1\n\n\n")
         else:
@@ -165,12 +165,12 @@ def generate_script(name, ra, dec, mag, priority, is_lot="False", Repeat=0, auto
     else:
         if Repeat > 0:
             script = (f";==={telescope}_{priority}_priority===\n\n"
+                    f"#REPEAT {Repeat}\n"
                     f"#BINNING {all_bins}\n"
                     f"#FILTER {all_filters}\n"
                     f"#INTERVAL {all_exp_times}\n"
                     f"#COUNT {all_count}\n"
                     f";# mag: {mag} mag\n"
-                    f"#REPEAT {Repeat}\n"
                     f"{name}\t{ra}\t{dec}\n"
                     f"#WAITFOR 1\n\n\n")
         else:
