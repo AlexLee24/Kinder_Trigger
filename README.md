@@ -14,6 +14,12 @@ Kinder Trigger tool is designed specifically for astronomical observations that 
 
 ### Dependencies
 
+Git clone
+
+```bash
+git clone https://github.com/AlexLee24/Kinder_Trigger.git
+```
+
 Install required packages using pip:
 
 ```bash
