@@ -159,6 +159,34 @@ if send_to_control_room == "True":
 # ===========================================================================
 
 # ========================= Function ========================================
+def check_for_updates():
+    import subprocess
+    import sys
+    try:
+        print("Checking for updates...")
+        # Fetch latest remote information
+        subprocess.run(['git', 'fetch'], check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        
+        # Check if local repository is behind remote
+        result = subprocess.run(['git', 'rev-list', '--count', 'HEAD..origin/main'], 
+                              check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        
+        commits_behind = result.stdout.decode('utf-8').strip()
+        if commits_behind and int(commits_behind) > 0:
+            print(f"\nUpdate available! Your local code is {commits_behind} commits behind the GitHub version.")
+            print("It is recommended to use 'git pull' to update your code for the latest features and bug fixes.\n")
+            
+            update_now = input("Update now? (y/n): ")
+            if update_now.lower() == 'y':
+                print("Updating...")
+                subprocess.run(['git', 'pull'], check=False)
+                print("Update complete, please restart the program.")
+                sys.exit(0)
+        else:
+            print("Your code is up to date.")
+    except Exception as e:
+        print(f"Cannot check for updates: {e}")
+check_for_updates()
 # read json file
 def read_json(file):
     with open(file, "r", encoding="utf-8") as f:

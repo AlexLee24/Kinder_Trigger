@@ -89,12 +89,19 @@ Create a Trigger.json file with the following format:
 - **RA**: Right Ascension (hours:minutes:seconds)
 - **Dec**: Declination (degrees:minutes:seconds)
 - **Mag**: Magnitude
-- **Priority**: Priority level (None, First, Top or Higher)
+- **Priority**: Priority level (Urgent, High(_order), Filler)
 - **Exp_By_Mag**: Whether to automatically calculate exposure time based on magnitude
 - **Filter**: Filters to use, e.g., up, gp, rp, ip, zp (required when Exp_By_Mag is False)
 - **Exp_Time**: Exposure time in seconds (required when Exp_By_Mag is False)
 - **Num_of_Frame**: Number of exposures (required when Exp_By_Mag is False)
 - **Repeat**: Repeat the plan (required when Exp_By_Mag is False) (Set "0" for no repeat, set "999" for unlimit repeat)
+
+### Priority Detail
+
+- **Urgent**: Immediate, time‑sensitive observations, execute right away. Must specify minimum elevation or start time.
+- **High(_Order)**: Important scientific targets, preferred to observe same night. Must specify minimum elevation or start time. If multiple targets are all High, please indicate priority order; otherwise the assistant will schedule them automatically. For multiple high priority: High_1, High_2. For single high priority: High.
+- **Normal**: Standard targets; observe based on conditions. Prefer observations at high elevation.
+- **Filler**: Filler observations after other targets are completed. No strict conditions.
 
 ### JSON Examples
 
@@ -106,7 +113,7 @@ Create a Trigger.json file with the following format:
     "RA": "11:18:22.087",
     "Dec": "-32:50:15.27",
     "Mag": 19.20,
-    "Priority": "None",
+    "Priority": "Normal",
     "Exp_By_Mag": "True",
     "Filter": "",
     "Exp_Time": "",
@@ -123,7 +130,7 @@ Create a Trigger.json file with the following format:
     "RA": "11:18:22.087",
     "Dec": "-32:50:15.27",
     "Mag": 19.20,
-    "Priority": "None",
+    "Priority": "Normal",
     "Exp_By_Mag": "False",
     "Filter": "gp, rp",
     "Exp_Time": "300, 300",
@@ -140,7 +147,7 @@ Create a Trigger.json file with the following format:
   "RA": "00:42:44.3",
   "Dec": "+41:16:09",
   "Mag": 3.4,
-  "Priority": "Top",
+  "Priority": "High_1",
   "Exp_By_Mag": "False",
   "Filter": "up, gp, rp, ip",
   "Exp_Time": "60, 30, 30, 30",
@@ -157,7 +164,7 @@ Create a Trigger.json file with the following format:
   "RA": "00:42:44.3",
   "Dec": "+41:16:09",
   "Mag": 3.4,
-  "Priority": "Top",
+  "Priority": "Urgent",
   "Exp_By_Mag": "False",
   "Filter": "up, gp, rp, ip",
   "Exp_Time": "60, 30, 30, 30",
