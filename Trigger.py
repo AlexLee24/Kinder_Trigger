@@ -178,10 +178,14 @@ def check_for_updates():
             
             update_now = input("Update now? (y/n): ")
             if update_now.lower() == 'y':
-                print("Updating...")
-                subprocess.run(['git', 'pull'], check=False)
-                print("Update complete, please restart the program.")
-                sys.exit(0)
+                try:
+                    print("Updating...")
+                    subprocess.run(['git', 'pull'], check=False)
+                    print("Update complete, please restart the program.")
+                    sys.exit(0)
+                except Exception as e:
+                    print(f"Update failed: {e}")
+                    print("Please update manually using 'git pull'.")
         else:
             print("Your code is up to date.")
     except Exception as e:
