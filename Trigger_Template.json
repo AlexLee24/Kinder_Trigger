@@ -26,10 +26,10 @@
       "Mag": 0,
       "Priority": "Top",
       "Exp_By_Mag": "False",
-      "Filter": "zp",
-      "Exp_Time": "300",
-      "Num_of_Frame": "24",
-      "Repeat": 1
+      "Filter": "up, gp",
+      "Exp_Time": "300, 300",
+      "Num_of_Frame": "1, 1",
+      "Repeat": 999
     }
   ]
 }
