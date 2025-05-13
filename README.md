@@ -90,13 +90,13 @@ Create a Trigger.json file with the following format:
 - **object name**: Target celestial body name
 - **RA**: Right Ascension (hours:minutes:seconds)
 - **Dec**: Declination (degrees:minutes:seconds)
-- **Mag**: Magnitude
+- **Mag**: Magnitude (if you set "Exp_By_Mag" as "False", only for display)
 - **Priority**: Priority level (Urgent, High(_order), Filler)
-- **Exp_By_Mag**: Whether to automatically calculate exposure time based on magnitude
-- **Filter**: Filters to use, e.g., up, gp, rp, ip, zp (required when Exp_By_Mag is False)
-- **Exp_Time**: Exposure time in seconds (required when Exp_By_Mag is False)
-- **Num_of_Frame**: Number of exposures (required when Exp_By_Mag is False)
-- **Repeat**: Repeat the plan (required when Exp_By_Mag is False) (Set "0" for no repeat, set "999" for unlimit repeat)
+- **Exp_By_Mag**: Whether to automatically calculate exposure time based on magnitude ("True" or "False") 
+- **Filter**: Filters to use, e.g., up, gp, rp, ip, zp (required when Exp_By_Mag is "False")
+- **Exp_Time**: Exposure time in seconds (required when "Exp_By_Mag" is "False")
+- **Num_of_Frame**: Number of exposures (required when "Exp_By_Mag" is "False")
+- **Repeat**: Repeat the plan (required when "Exp_By_Mag" is "False") (Set "0" for no repeat, set "999" for unlimit repeat)
 
 ### Priority Detail
 
