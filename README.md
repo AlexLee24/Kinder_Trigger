@@ -173,6 +173,13 @@ Create a Trigger.json file with the following format:
 }
 ```
 
+### Env Example
+Please ask Alex on slack to get the file or token
+```env
+SLACK_BOT_TOKEN= Bot Token
+SLACK_CHANNEL_ID_CONTROL_ROOM= Channel ID
+```
+
 ### Running the Observation Plan
 
 ```bash
@@ -197,7 +204,7 @@ The Object visibility plot will be generated in the obs_img folder.
 
 ## Developers
 
-Kinder team and National Central University Astronomy Institute GREAT Lab
+Kinder team and National Central University Institute of Astronomy GREAT Lab
 
 ## License
 

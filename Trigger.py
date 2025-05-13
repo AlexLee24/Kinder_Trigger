@@ -1,6 +1,7 @@
 import json
 # ========================= Setting =========================================
 json_file = "Trigger.json"       # JSON file name
+#json_file = "Trigger_LOT.json"       # JSON file name
 
 try:
     with open(json_file, "r", encoding="utf-8") as f:
@@ -32,96 +33,6 @@ check = input("Do you want to continue? (y/n): ")
 if check.lower() not in ["y", ""]:
     exit()
 # ===========================================================================
-'''
-Create a Trigger.json file with the following format:
-
-```json
-[
-  {
-    "object name": "",
-    "RA": "",
-    "Dec": "",
-    "Mag": ,
-    "Priority": "",
-    "Exp_By_Mag": "",
-    "Filter": "",
-    "Exp_Time": "",
-    "Num_of_Frame": ""
-  }
-]
-```
-
-### Parameter Explanation
-
-- **object name**: Target celestial body name
-- **RA**: Right Ascension (hours:minutes:seconds)
-- **Dec**: Declination (degrees:minutes:seconds)
-- **Mag**: Magnitude
-- **Priority**: Priority level (None, First, Top or Higher)
-- **Exp_By_Mag**: Whether to automatically calculate exposure time based on magnitude
-- **Filter**: Filters to use, e.g., up, gp, rp, ip, zp (required when Exp_By_Mag is False)
-- **Exp_Time**: Exposure time in seconds (required when Exp_By_Mag is False)
-- **Num_of_Frame**: Number of exposures (required when Exp_By_Mag is False)
-
-### JSON Examples
-
-#### Example 1: Automatic Exposure Time Based on Magnitude
-
-```json
-{
-    "object name": "SN 2024ggi",
-    "RA": "11:18:22.087",
-    "Dec": "-32:50:15.27",
-    "Mag": 19.20,
-    "Priority": "None",
-    "Exp_By_Mag": "True",
-    "Filter": "",
-    "Exp_Time": "",
-    "Num_of_Frame": ""
-}
-```
-
-#### Example 2: Manual Exposure Settings with Multiple Filters
-
-```json
-{
-    "object name": "SN 2024ggi",
-    "RA": "11:18:22.087",
-    "Dec": "-32:50:15.27",
-    "Mag": 19.20,
-    "Priority": "None",
-    "Exp_By_Mag": "False",
-    "Filter": "gp, rp",
-    "Exp_Time": "300, 300",
-    "Num_of_Frame": "12, 12"
-}
-```
-
-#### Example 3: High Priority Target
-
-```json
-{
-  "object name": "M31",
-  "RA": "00:42:44.3",
-  "Dec": "+41:16:09",
-  "Mag": 3.4,
-  "Priority": "Top",
-  "Exp_By_Mag": "False",
-  "Filter": "up, gp, rp, ip",
-  "Exp_Time": "60, 30, 30, 30",
-  "Num_of_Frame": "5, 5, 5, 5"
-}
-```
-'''
-
-
-
-
-
-
-
-
-
 
 import os
 import json

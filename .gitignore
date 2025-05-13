@@ -177,6 +177,7 @@ cython_debug/
 obs_img/
 Trigger.json
 Trigger2.json
+Trigger_LOT.json
 .DS_Store
 .DS_Store/
 /.DS_Store
