@@ -38,16 +38,18 @@ Note: Some packages like `slack-sdk` and `python-dotenv` may need to be installe
 pip install slack-sdk python-dotenv timezonefinder
 ```
 
-### Environment Variables
 
-Create a .env file and set the following environment variables:
-
-```
-SLACK_BOT_TOKEN=your_slack_token
-SLACK_CHANNEL_ID_CONTROL_ROOM=control_room_channel_id
-```
 
 ## Usage
+
+### Set up .env file (not necessary)
+
+Please ask Alex on Slack to obtain the file or token. The file isn’t strictly necessary, but you can use it if you want to send the trigger message automatically.
+
+```env
+SLACK_BOT_TOKEN= Bot Token
+SLACK_CHANNEL_ID_CONTROL_ROOM= Channel ID
+```
 
 ### Configuring Observation Targets
 
@@ -173,12 +175,7 @@ Create a Trigger.json file with the following format:
 }
 ```
 
-### Env Example
-Please ask Alex on slack to get the file or token
-```env
-SLACK_BOT_TOKEN= Bot Token
-SLACK_CHANNEL_ID_CONTROL_ROOM= Channel ID
-```
+
 
 ### Running the Observation Plan
 
