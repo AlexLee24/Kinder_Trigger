@@ -115,14 +115,20 @@ def read_json(file):
 # send slack message
 def send_slack_message(message, file_path, channel_id):
     try:
-        client.chat_postMessage(
-            channel=channel_id, 
-            text=message
-        )
-        client.files_upload_v2(
-            channel=channel_id,
-            file=file_path 
-        )
+        if message != None:
+            client.chat_postMessage(
+                channel=channel_id, 
+                text=message
+            )
+            client.files_upload_v2(
+                channel=channel_id,
+                file=file_path 
+            )
+        elif message == None:
+            client.files_upload_v2(
+                channel=channel_id,
+                file=file_path 
+            )
     except SlackApiError as e:
         print(f"Send message to Slack failed: {e.response['error']}")
 
@@ -136,12 +142,13 @@ slack_message = (
     "您好，若天氣允許，以下是今日的觀測目標:\n"
     "If the weather permits, here are today's observation targets:\n"
 )
-script = "script:\n```\n"
+script_head = "script:\n=====\n" #```
 data = read_json(json_file)
 now = datetime.now()
 current_day = now.strftime("%Y-%m-%d")
 
 target_list = []
+script = ""
 for obj in data:
     object_name = obj["object name"]
     ra = obj["RA"]
@@ -166,15 +173,26 @@ for obj in data:
         script += tri.generate_script(object_name, ra, dec, Mag, Priority, IS_LOT, Repeat, auto_exp=False, filter_input=filter_val, exp_time=exp_time, count=count)
 
 img_path = tri.generate_img(current_day, target_list)
-final_message = slack_message + script + "```"
+final_message = slack_message# + script_head + script + "======"# + "```"
+
+# Save script to file
+script_file = "script.txt"
+try:
+    with open(script_file, "w", encoding="utf-8") as f:
+        f.write(script)
+    print(f"Script saved to {script_file}")
+except Exception as e:
+    print(f"Error saving script to file: {e}")
+
 print("=====================")
-print(final_message)
+print("if you didn't set the send_to_control_room in Trigger.json, please copy the scipt.txt and obsimg then send it to control room")
 print("=====================")
 
 if send_to_control_room == "True":
-    check2 = input("Do you really want to send this trigger to contro; room?(y/n): ")
+    check2 = input("Do you really want to send this trigger to control room?(y/n): ")
     if check2 == "y":
-        send_slack_message(final_message, img_path, channel_id_control_room)
+        send_slack_message(final_message, script_file, channel_id_control_room)
+        send_slack_message(None, img_path, channel_id_control_room)
         print("Send message to control room")
     else:
         print("Did not send message to control room")
