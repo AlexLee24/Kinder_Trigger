@@ -36,14 +36,14 @@ def exposure_time(mag):
     try:
         mag = int(float(mag))
         if mag > 22:
-            return "Too faint to observe"
+            return "Too faint to observe, please use LOT for follow-up observation"
         if mag < 12:
             return {"up": '60sec*1', "gp": '30sec*1', "rp": '30sec*1', "ip": '30sec*1', "zp": '30sec*1'}
         return exposure_times.get(mag, "Invalid magnitude")
     except:
         mag = str(mag)
         if mag == ">22":
-            return "Too faint to observe"
+            return "Too faint to observe, please use LOT for follow-up observation"
 
 
 # Check Filter SLT

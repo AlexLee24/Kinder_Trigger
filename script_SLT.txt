@@ -1,0 +1,23 @@
+;===SLT_High_priority===
+
+#BINNING 1, 1, 1, 1, 1
+#FILTER up_Astrodon_2018, gp_Astrodon_2018, rp_Astrodon_2018, ip_Astrodon_2018, zp_Astrodon_2018
+#INTERVAL 300, 300, 300, 300, 300
+#COUNT 2, 1, 1, 1, 1
+;# mag: 18.75 mag
+SN2025afcr	12:38:41.77	07:36:37.7
+#WAITFOR 1
+
+
+;AT2026dbl: 40度以上開始觀測
+;===SLT_Urgent_priority===
+
+#BINNING 1, 1, 1, 1, 1
+#FILTER up_Astrodon_2018, gp_Astrodon_2018, rp_Astrodon_2018, ip_Astrodon_2018, zp_Astrodon_2018
+#INTERVAL 300, 300, 300, 300, 300
+#COUNT 3, 3, 3, 3, 3
+;# mag: 19.5 mag
+AT2026dbl	09:01:17.37	18:36:07.7
+#WAITFOR 1
+
+

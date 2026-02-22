@@ -1,0 +1,12 @@
+;SN2025wny: Only observe when seeing is good
+;===LOT_High_priority===
+
+#BINNING 1
+#FILTER rp_Astrodon_2019
+#INTERVAL 300
+#COUNT 6
+;# mag: >21 mag
+SN2025wny	07:16:34.50	+38:21:08.11
+#WAITFOR 1
+
+

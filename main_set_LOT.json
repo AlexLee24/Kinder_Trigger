@@ -1,0 +1,26 @@
+{
+  "version": 2,
+  "settings": {
+    "telescope": "LOT"
+  },
+  "targets": [
+    {
+      "name": "SN2025wny",
+      "ra": "07:16:34.50",
+      "dec": "+38:21:08.11",
+      "mag": ">21",
+      "priority": "High",
+      "auto_exposure": false,
+      "observations": [
+        {
+          "filter": "rp",
+          "exp_time": 300,
+          "count": 6
+        }
+      ],
+      "repeat": 0,
+      "program": "R01",
+      "note": "Only observe when seeing is good"
+    }
+  ]
+}

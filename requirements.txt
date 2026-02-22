@@ -13,6 +13,9 @@ slack-sdk>=3.19.0
 # Environment variables
 python-dotenv>=1.0.0
 
+# GUI Framework (Cross-platform)
+flet>=0.22.0
+
 # To install with pip, use: pip install -r requirements.txt
 # To install with conda, use: conda install --file requirements.txt
 # Some packages might need to be installed with pip even in a conda environment

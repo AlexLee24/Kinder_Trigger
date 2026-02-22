@@ -754,20 +754,22 @@ def plot_observing_tracks(target_list, observer, obsstart, obsend, weights=None,
         transit_time_str = calculate_transit_time_single(target, observer, meanobstime, return_fmt='str', mode=mode)
         transit_times[i] = transit_time_str
 
-        '''if transit_time_str:
-            try:
-                transit_dt = datetime.strptime(transit_time_str, '%Y/%m/%d %H:%M:%S')
-                # Draw a vertical line at the transit time
-                axin.axvline(transit_dt, ls=':', color='0.5', zorder=-1)
-                # Annotate the transit time on the plot
-                axin.annotate(f"Transit time of {target.name} =  {transit_time_str[-8:]} (UTC)",
-                              xy=[transit_dt, 50.],
-                              xytext=[transit_dt + timedelta(minutes=-25), 50.],
-                              va='center', rotation=90, color='0.5')
-            except Exception as e:
-                print(f"{target.name}, {transit_time_str}, Error：{e}")'''
+        # if transit_time_str:
+        #     try:
+        #         transit_dt = datetime.strptime(transit_time_str, '%Y/%m/%d %H:%M:%S')
+        #         # Draw a vertical line at the transit time
+        #         axin.axvline(transit_dt, ls=':', color='0.5', zorder=-1)
+        #         # Annotate the transit time on the plot
+        #         axin.annotate(f"Transit time of {target.name} =  {transit_time_str[-8:]} (UTC)",
+        #                       xy=[transit_dt, 50.],
+        #                       xytext=[transit_dt + timedelta(minutes=-25), 50.],
+        #                       va='center', rotation=90, color='0.5')
+        #     except Exception as e:
+        #         print(f"{target.name}, {transit_time_str}, Error：{e}")
 
-        label_str = f"{target.name} (RA: {target._ra}, DEC: {target._dec})"
+        moon_sep = moonsep_single(target, observer, obsstart)
+
+        label_str = f"{target.name} (RA: {target._ra}, DEC: {target._dec}, Moon sep: {moon_sep:.1f}°)"
         if simpletracks == True:
             axin.plot(times_utc, alts, lw=1.5, label=label_str, zorder=5)
         else:

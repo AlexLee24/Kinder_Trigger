@@ -184,3 +184,13 @@ script.txt
 /.DS_Store
 *.DS_Store
 test.py
+Trigger*.json
+assest/
+build.txt
+Kinder_dark.png
+Kinder_light.png
+pyproject.toml
+assets/icon.png
+.vscode/settings.json
+.vscode/
+plot/
