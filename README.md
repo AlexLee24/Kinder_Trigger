@@ -2,7 +2,7 @@
 
 Astronomical observation task trigger tool for the Kinder Team. Automatically generates ACP observation scripts and sends them to the control room.
 
-Supports both **SLT** (Super Light Telescope) and **LOT** (Lulin One-meter Telescope).
+Supports both **SLT** and **LOT** (Lulin One-meter Telescope).
 
 ## Installation
 
