@@ -84,7 +84,7 @@ When Auto Exposure is off, configure filters manually:
 | Set | Filters |
 |-----|---------|
 | SDSS | up, gp, rp, ip, zp |
-| Johnson-Cousins | U, B, V, R, I |
+| Johnson-Cousins (developing)| U, B, V, R, I |
 
 ---
 
