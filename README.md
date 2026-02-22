@@ -1,67 +1,199 @@
-An astronomical observation task trigger tool for automatically generating observation scripts and sending them to the control room.
+# Kinder Trigger
 
-Supports both **GUI App** (cross-platform) and **CLI** modes.
+Astronomical observation task trigger tool for the Kinder Team. Automatically generates ACP observation scripts and sends them to the control room.
 
-## Features
-
-- Visual target builder with card-based UI
-- Support both LOT (Lulin One-meter Telescope) and SLT modes
-- RA / Dec input in **sexagesimal** (`hh:mm:ss`) or **decimal degrees** (auto-converted)
-- Auto or manual exposure configuration per filter (ugriz)
-- Automatically generate ACP observation scripts
-- Object visibility plot preview
-- Send observation plans to the control room via Slack
-- Cross-platform: Windows, macOS, Linux, iOS, Android, Web
+Supports both **SLT** (Super Light Telescope) and **LOT** (Lulin One-meter Telescope).
 
 ## Installation
 
-### Clone
+Download the latest `.dmg` file from the [Releases](https://github.com/AlexLee24/Kinder_Trigger/releases) page. Double-click to mount the disk image, then drag **Kinder Trigger.app** into your Applications folder.
 
-```bash
-git clone https://github.com/AlexLee24/Kinder_Trigger.git
-cd Kinder_Trigger
-```
+> **First launch on macOS**: If you see "cannot be opened because it is from an unidentified developer", go to **System Settings -> Privacy & Security** and click "Open Anyway".
 
-### Install Dependencies
+---
 
-```bash
-pip install -r requirements.txt
-```
+## Interface Overview
 
-> Some packages may need pip even in a conda environment:
-> ```bash
-> pip install slack-sdk python-dotenv timezonefinder flet
-> ```
-
-## Quick Start (GUI App)
-
-```bash
-python Trigger_App.py
-```
-
-The app has 4 pages accessible from the left sidebar:
+The left sidebar contains four pages:
 
 | Page | Description |
 |------|-------------|
-| **Home** | Manage targets, switch telescope (SLT/LOT), set data path, import from legacy JSON |
-| **Script** | Generate ACP script + visibility plot |
-| **Send** | Preview and send script to Slack control room |
-| **Settings** | Configure data path, Slack credentials |
+| **Home** | Manage observation target list |
+| **Script** | Generate ACP observation script and visibility plot |
+| **Send** | Preview script and send to Slack control room |
+| **Settings** | Configure data path, Slack credentials, and LOT programs |
 
-### Adding Targets
+---
 
-1. Click **+** on the Home page
-2. Fill in target name, RA, Dec, magnitude
-3. Choose priority level
-4. Toggle **Auto Exposure** on (by magnitude) or off (manual filter/exp/count)
-5. Click **Save Target**
+## Page 1 — Home
 
-> **Coordinate formats**: RA/Dec accept both `hh:mm:ss.ss` / `±dd:mm:ss.ss` and decimal degrees.
-> Decimal degrees are auto-converted to sexagesimal in the generated script.
+### Basic Operations
 
-> **Target names**: Spaces, underscores, and special characters are automatically stripped in the script output. Only letters, digits, and hyphens are kept.
+- Use the **Telescope** dropdown (top right) to switch between SLT and LOT. The corresponding JSON file is loaded automatically.
+- Click **Add Target** to add a new target.
+- Each target card has the following buttons:
+  - Up / Down arrows — reorder targets
+  - Edit — open the target editor
+  - Copy — duplicate the target
+  - Delete — remove the target
+- All changes are auto-saved to `main_set_SLT.json` or `main_set_LOT.json`.
 
-### JSON Format (v2)
+### Add / Edit Target Fields
+
+| Field | Description |
+|-------|-------------|
+| **Target Name** | Target identifier (only letters, digits, and hyphens are kept in the script) |
+| **RA** | Right Ascension — accepts `hh:mm:ss.ss` or decimal degrees (auto-converted) |
+| **Dec** | Declination — accepts `+/-dd:mm:ss.ss` or decimal degrees (auto-converted) |
+| **Magnitude** | Apparent magnitude |
+| **Priority** | Normal / High / Urgent |
+| **Repeat** | Number of repeat observations (0 = no repeat) |
+| **Program** | LOT only — select observation program (e.g. R01, R07) |
+| **Auto Exposure** | Automatically determine exposure time from magnitude (see rules below) |
+| **Note** | Required when priority is Urgent |
+
+### Exposure Rules
+
+**SLT — Auto Exposure Table**:
+
+| Magnitude | up | gp | rp | ip | zp |
+|-----------|-----|-----|-----|-----|-----|
+| <=12 | 60s x1 | 30s x1 | 30s x1 | 30s x1 | 30s x1 |
+| 13-14 | 60s x2 | 60s x1 | 60s x1 | 60s x1 | 60s x1 |
+| 15-16 | 150s x2 | 150s x1 | 150s x1 | 150s x1 | 150s x1 |
+| 17-19 | 300s x2 | 300s x1 | 300s x1 | 300s x1 | 300s x1 |
+| 20 | — | — | 300s x6 | — | — |
+| 21 | — | — | 300s x12 | — | — |
+| 22 | — | — | 300s x36 | — | — |
+| >22 or <12 | Manual exposure required |
+
+**LOT**: Auto Exposure is always disabled. Manual filter and exposure settings are required for all targets.
+
+### Manual Exposure Configuration
+
+When Auto Exposure is off, configure filters manually:
+
+- **Add Filter** — add a single filter row (default: rp, 300s, x1)
+- **+ All ugriz** — add all five SDSS filters at once
+- **+ All UBVRI** — add all five Johnson-Cousins filters at once
+- Each filter row has independent exposure time (seconds) and count settings
+- Subtotals and grand total exposure time are updated in real time
+
+### Supported Filters
+
+| Set | Filters |
+|-----|---------|
+| SDSS | up, gp, rp, ip, zp |
+| Johnson-Cousins | U, B, V, R, I |
+
+---
+
+## Page 2 — Script
+
+### Steps
+
+1. Select **Telescope** (SLT or LOT).
+2. If LOT is selected, choose a **Program** (e.g. R01).
+3. Choose the target sort order:
+   - **Home order** — use the order from the Home page
+   - **Rise time order** — sort by rise time, earliest first
+4. Click **Generate Script**.
+5. The visibility plot appears on the right (Object Visibility).
+6. Click **Copy to Clipboard** to copy the script.
+
+### Output Files
+
+Files are saved under the configured data path:
+
+- Scripts:
+  - SLT -> `script_SLT.txt`
+  - LOT R01 -> `script_LOT_R01.txt`
+- Visibility plots (in `plot/` subfolder):
+  - SLT -> `obv_plot_SLT.jpg`
+  - LOT R01 -> `obv_plot_LOT_R01.jpg`
+
+### Generated ACP Script Format
+
+```
+;===SLT_Normal_priority===
+
+#BINNING 1, 1, 1, 1, 1
+#FILTER up_Astrodon_2018, gp_Astrodon_2018, rp_Astrodon_2018, ip_Astrodon_2018, zp_Astrodon_2018
+#INTERVAL 300, 300, 300, 300, 300
+#COUNT 2, 1, 1, 1, 1
+;# mag: 17.5 mag
+SN2024ggi	11:18:22.09	-32:50:15.27
+#WAITFOR 1
+```
+
+---
+
+## Page 3 — Send
+
+### Steps
+
+1. Select a script file from the dropdown (filename and modification date are shown).
+2. Click **Load**:
+   - The script content appears in the left preview panel.
+   - The visibility plot is regenerated from the current target list and shown on the right.
+   - The message field is auto-populated with telescope and program information.
+3. Edit the message text if needed.
+4. Click **Send to Slack** and confirm in the dialog.
+
+### What Gets Sent
+
+The following are sent to the Slack control room channel:
+
+1. The message text
+2. The observation script file (.txt)
+3. The visibility plot (.jpg)
+
+---
+
+## Page 4 — Settings
+
+### Data Path
+
+The directory where all JSON files, scripts, and plots are stored. Defaults to `~/Documents/Kinder_Trigger/`. Click **Change Folder** to update.
+
+### LOT Programs
+
+- Manage the list of LOT observation programs (e.g. R01, R07, R11) using chip tags.
+- Click **Add** to add a new program code (automatically uppercased).
+- Click the X on a chip to remove a program.
+- The list is persisted to `~/.kinder_trigger/programs.json`.
+
+### Slack Configuration
+
+| Field | Description |
+|-------|-------------|
+| **Slack Bot Token** | Bot token (`xoxb-...`). Contact Alex to obtain one. |
+| **Slack Channel ID** | Control room channel ID (`C...`). |
+
+Click **Save to .env** to persist. Settings are stored in `~/.kinder_trigger/.env`.
+
+---
+
+## Directory Structure
+
+```
+~/Documents/Kinder_Trigger/        <- data path (configurable in Settings)
+├── main_set_SLT.json              <- SLT target list
+├── main_set_LOT.json              <- LOT target list
+├── script_SLT.txt                 <- generated SLT script
+├── script_LOT_R01.txt             <- generated LOT R01 script
+└── plot/                          <- visibility plots
+    ├── obv_plot_SLT.jpg
+    └── obv_plot_LOT_R01.jpg
+
+~/.kinder_trigger/                 <- config directory (persists across app updates)
+├── .env                           <- Slack credentials + DATA_PATH
+└── programs.json                  <- LOT program list
+```
+
+---
+
+## JSON Format (v2)
 
 Targets are auto-saved to `main_set_SLT.json` or `main_set_LOT.json`:
 
@@ -74,18 +206,19 @@ Targets are auto-saved to `main_set_SLT.json` or `main_set_LOT.json`:
       "name": "SN2024ggi",
       "ra": "11:18:22.087",
       "dec": "-32:50:15.27",
-      "mag": "19.2",
+      "mag": "17.5",
       "priority": "Normal",
       "auto_exposure": true,
       "observations": [],
       "repeat": 0,
+      "program": "",
       "note": ""
     }
   ]
 }
 ```
 
-Manual exposure example:
+### Manual Exposure Example
 
 ```json
 {
@@ -100,161 +233,76 @@ Manual exposure example:
     { "filter": "rp", "exp_time": 300, "count": 5 }
   ],
   "repeat": 0,
+  "program": "",
   "note": "Monitor nightly"
 }
 ```
 
-Legacy v1 JSON files are auto-converted on import.
-
-### Priority Levels
-
-| Priority | Description |
-|----------|-------------|
-| **Top** | Highest priority, override everything |
-| **Urgent** | Immediate, time-sensitive. Must specify minimum elevation or start time |
-| **Urgent_Observe_When_Possible** | Urgent but flexible timing |
-| **High** | Important scientific targets, preferred same night |
-| **Normal** | Standard targets; observe based on conditions |
-| **None** | Filler observations after other targets are completed |
-
-### Environment Variables (.env)
-
-The app auto-creates a `.env` file on first launch. You can also edit it in **Settings**:
-
-```env
-DATA_PATH=/path/to/data          # Where JSON files are stored
-SLACK_BOT_TOKEN=xoxb-...         # Slack bot token
-SLACK_CHANNEL_ID_CONTROL_ROOM=C... # Slack channel ID
-```
-
-> Ask Alex on Slack to obtain the Slack token. The `.env` file is optional if you don't need auto-sending.
-
-## CLI Mode (Legacy)
-
-```bash
-python Trigger.py
-```
-
-Uses the legacy `Trigger.json` format. See [legacy JSON examples](#legacy-json-format) below.
-
-### Legacy JSON Format
+### LOT Target Example (with program)
 
 ```json
 {
-  "settings": {
-    "IS_LOT": false,
-    "send_to_control_room": false
-  },
-  "targets": [
-    {
-      "object name": "SN 2024ggi",
-      "RA": "11:18:22.087",
-      "Dec": "-32:50:15.27",
-      "Mag": 19.20,
-      "Priority": "Normal",
-      "Exp_By_Mag": "True",
-      "Filter": "",
-      "Exp_Time": "",
-      "Num_of_Frame": "",
-      "Repeat": 0
-    }
-  ]
+  "name": "AT2025abc",
+  "ra": "14:30:12.5",
+  "dec": "+25:10:45.0",
+  "mag": "19.0",
+  "priority": "Normal",
+  "auto_exposure": false,
+  "observations": [
+    { "filter": "rp", "exp_time": 300, "count": 3 },
+    { "filter": "ip", "exp_time": 300, "count": 3 }
+  ],
+  "repeat": 0,
+  "program": "R01",
+  "note": ""
 }
 ```
 
-#### Legacy Parameter Reference
+### Field Reference
 
-| Parameter | Description |
-|-----------|-------------|
-| `IS_LOT` | `true` for LOT, `false` for SLT |
-| `send_to_control_room` | `true` to auto-send via Slack |
-| `object name` | Target name |
-| `RA` | Right Ascension (hh:mm:ss) |
-| `Dec` | Declination (±dd:mm:ss) |
-| `Mag` | Magnitude |
-| `Priority` | Urgent, High, Normal, Filler |
-| `Exp_By_Mag` | `"True"` for auto exposure, `"False"` for manual |
-| `Filter` | Filters: up, gp, rp, ip, zp (when manual) |
-| `Exp_Time` | Exposure time in seconds (when manual) |
-| `Num_of_Frame` | Number of frames (when manual) |
-| `Repeat` | 0 = no repeat, 999 = unlimited |
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Target name |
+| `ra` | string | Right Ascension (`hh:mm:ss.ss` or decimal degrees) |
+| `dec` | string | Declination (`+/-dd:mm:ss.ss` or decimal degrees) |
+| `mag` | string | Apparent magnitude |
+| `priority` | string | `"Normal"` / `"High"` / `"Urgent"` |
+| `auto_exposure` | bool | `true` = auto by magnitude, `false` = manual |
+| `observations` | array | Manual exposure settings (used when `auto_exposure` is false) |
+| `repeat` | int | Repeat count (0 = no repeat) |
+| `program` | string | LOT program code (leave empty for SLT) |
+| `note` | string | Notes (required for Urgent priority) |
+
+> Legacy v1 JSON files are automatically converted to v2 on load.
+
+---
+
+## Environment Variables (.env)
+
+Created automatically at `~/.kinder_trigger/.env` on first launch:
+
+```env
+DATA_PATH=/Users/you/Documents/Kinder_Trigger
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_CHANNEL_ID_CONTROL_ROOM=C...
+```
+
+| Variable | Description |
+|----------|-------------|
+| `DATA_PATH` | Directory for JSON files, scripts, and plots |
+| `SLACK_BOT_TOKEN` | Slack Bot Token (contact Alex to obtain) |
+| `SLACK_CHANNEL_ID_CONTROL_ROOM` | Slack control room channel ID |
+
+---
 
 ## Important Notes
 
-- Triple-check the accuracy of the observation plan before sending to control room
-- Ensure `.env` is not included in version control
-- The `obs_img/` directory is auto-created for visibility plots
-- Data files (JSON, script.txt, obs_img) are stored in `~/Documents/Kinder_Trigger/` by default
+- Triple-check the observation plan before sending to the control room.
+- The `.env` file contains sensitive credentials — do not commit it to version control.
+- Coordinates accept decimal degree input and are automatically converted to sexagesimal in the generated script.
+- Target names are sanitized in the script output: only letters, digits, and hyphens are kept.
 
-## Packaging as Desktop App
-
-### Prerequisites
-
-```bash
-pip install pyinstaller
-```
-
-### macOS (.app)
-
-```bash
-./build_macos.sh
-```
-
-Or manually:
-
-```bash
-pyinstaller --name "Kinder Trigger" --windowed --onedir --icon assets/icon.png \
-  --add-data "Trigger_LOT_SLT.py:." --add-data "obsplan.py:." --add-data "assets:assets" \
-  --noconfirm Trigger_App.py
-```
-
-Output: `dist/Kinder Trigger.app`
-
-### Windows (.exe)
-
-Run `build_windows.bat` on a Windows machine with the same dependencies installed.
-
-Or manually:
-
-```bash
-pyinstaller --name "Kinder Trigger" --windowed --onedir --icon assets/icon.png ^
-  --add-data "Trigger_LOT_SLT.py;." --add-data "obsplan.py;." --add-data "assets;assets" ^
-  --noconfirm Trigger_App.py
-```
-
-Output: `dist\Kinder Trigger\Kinder Trigger.exe`
-
-> **Note**: On Windows, use `;` (semicolon) as the path separator in `--add-data` instead of `:` (colon).
-
-## File Structure
-
-```
-Kinder_Trigger/
-├── Trigger_App.py        # GUI App (Flet, cross-platform)
-├── Trigger.py            # CLI mode (legacy)
-├── Trigger_LOT_SLT.py    # ACP script generator
-├── obsplan.py            # Observation planning (based on obsplanning by Phil Cigan)
-├── pyproject.toml        # Build configuration
-├── requirements.txt      # Dependencies
-├── assets/               # App icons and logos
-│   ├── icon.png
-│   ├── Kinder_dark.png
-│   └── Kinder_light.png
-├── .env                  # Environment config (auto-generated in ~/.kinder_trigger/)
-├── main_set_SLT.json     # SLT targets (v2, in DATA_PATH)
-├── main_set_LOT.json     # LOT targets (v2, in DATA_PATH)
-├── script.txt            # Generated ACP script (in DATA_PATH)
-└── obs_img/              # Visibility plot output (in DATA_PATH)
-```
-
-## Module Description
-
-| Module | Description |
-|--------|-------------|
-| `Trigger_App.py` | Cross-platform GUI app built with Flet |
-| `Trigger.py` | CLI-based trigger (legacy) |
-| `Trigger_LOT_SLT.py` | ACP script generation for LOT and SLT |
-| `obsplan.py` | Astronomical calculation & plotting ([obsplanning](https://github.com/pjcigan/obsplanning) by Phil Cigan) |
+---
 
 ## Developers
 
