@@ -198,3 +198,5 @@ client*
 credentials.json
 main_testing.py
 exp_time_cal.py
+.tmp.driveupload/
+.git 2/
