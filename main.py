@@ -4,6 +4,7 @@ import os
 import re
 import base64
 import copy
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 import threading
@@ -35,8 +36,10 @@ PRIORITIES = ["Normal", "High", "Urgent"]
 TELESCOPES = ["SLT", "LOT"]
 DEFAULT_LOT_PROGRAMS = ["R01"]
 APP_TITLE = "Kinder Trigger"
-SCRIPT_FILE = "script.txt"  # basename only; full path resolved via _get_data_path()
-
+APP_VERSION = "1.0.1"
+GITHUB_REPO = "AlexLee24/Kinder_Trigger"
+KINDER_WEB_BASE_URL = "https://kinder.astro.ncu.edu.tw" 
+SCRIPT_FILE = "script.txt"
 # Use ~/.kinder_trigger/ for config so packaged app finds it reliably
 _CONFIG_DIR = os.path.join(str(Path.home()), ".kinder_trigger")
 os.makedirs(_CONFIG_DIR, exist_ok=True)
@@ -137,6 +140,8 @@ def _ensure_env_file():
             f.write(f"DATA_PATH={_default_data_path()}\n")
             f.write("SLACK_BOT_TOKEN=\n")
             f.write("SLACK_CHANNEL_ID_CONTROL_ROOM=\n")
+            f.write("KINDER_WEB_API=\n")
+            f.write("UPDATE_CHECK_FREQ=startup\n")
     # Load
     try:
         import dotenv
@@ -183,9 +188,95 @@ def _save_env_vars(env_dict):
         os.environ[k] = v
 
 
-def _save_env(token, channel):
-    """Write token and channel back to .env file."""
-    _save_env_vars({"SLACK_BOT_TOKEN": token, "SLACK_CHANNEL_ID_CONTROL_ROOM": channel})
+def _save_env(token, channel, kinder_web_api=""):
+    """Write token, channel, and kinder_web_api back to .env file."""
+    _save_env_vars({"SLACK_BOT_TOKEN": token, "SLACK_CHANNEL_ID_CONTROL_ROOM": channel,
+                    "KINDER_WEB_API": kinder_web_api})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Kinder Web API helpers
+# ═══════════════════════════════════════════════════════════════════════════════
+def _api_target_to_v2(api_t):
+    """Convert a single API response target to local v2 target format."""
+    return {
+        "name": api_t.get("name", ""),
+        "ra": api_t.get("ra", ""),
+        "dec": api_t.get("dec", ""),
+        "mag": str(api_t.get("mag", "")),
+        "priority": api_t.get("priority", "Normal"),
+        "auto_exposure": api_t.get("auto_exposure", True),
+        "observations": [
+            {"filter": f["filter"], "exp_time": f["exp"], "count": f["count"]}
+            for f in api_t.get("filters", [])
+        ],
+        "repeat": api_t.get("repeat_count", 0),
+        "program": api_t.get("program", ""),
+        "note": api_t.get("plan", ""),
+        "enabled": True,
+    }
+
+
+def _next_check_time(freq: str) -> float:
+    """Return the Unix timestamp of the next scheduled update check.
+    freq: 'daily' | 'weekly' | 'monthly'
+    """
+    now = datetime.now()
+    if freq == "daily":
+        # Next midnight
+        nxt = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    elif freq == "weekly":
+        # Next Monday 00:00
+        days_ahead = (7 - now.weekday()) % 7  # 0 = Monday
+        if days_ahead == 0:
+            days_ahead = 7
+        nxt = (now + timedelta(days=days_ahead)).replace(hour=0, minute=0, second=0, microsecond=0)
+    elif freq == "monthly":
+        # 1st of next month 00:00
+        if now.month == 12:
+            nxt = now.replace(year=now.year + 1, month=1, day=1,
+                              hour=0, minute=0, second=0, microsecond=0)
+        else:
+            nxt = now.replace(month=now.month + 1, day=1,
+                              hour=0, minute=0, second=0, microsecond=0)
+    else:
+        return float("inf")
+    return nxt.timestamp()
+
+
+def _fetch_latest_release():
+    """Query GitHub releases API and return (tag_name, html_url) or raise."""
+    import urllib.request as _req
+    import json as _json
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+    req = _req.Request(url, headers={"User-Agent": f"KinderTrigger/{APP_VERSION}",
+                                     "Accept": "application/vnd.github+json"})
+    with _req.urlopen(req, timeout=8) as resp:
+        data = _json.loads(resp.read().decode())
+    tag = data.get("tag_name", "").lstrip("v")
+    url = data.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
+    return tag, url
+
+
+def _version_tuple(v):
+    """Convert '1.2.3' to (1, 2, 3) for comparison."""
+    try:
+        return tuple(int(x) for x in str(v).split("."))
+    except Exception:
+        return (0,)
+
+
+def _fetch_web_targets(telescope, api_key):
+    """Fetch targets from Kinder Web API. Returns list of v2 targets or raises."""
+    import urllib.request as _req
+    import json as _json
+    url = f"{KINDER_WEB_BASE_URL}/api/v1/observation_targets?telescope={telescope}"
+    request = _req.Request(url, headers={"X-API-Key": api_key})
+    with _req.urlopen(request, timeout=10) as resp:
+        data = _json.loads(resp.read().decode())
+    if not data.get("success"):
+        raise RuntimeError("API returned success=false")
+    return [_api_target_to_v2(t) for t in data.get(telescope, [])]
 
 
 def _get_data_path():
@@ -359,10 +450,10 @@ def main(page: ft.Page):
         return ft.Container(
             border_radius=8,
             bgcolor=ft.Colors.with_opacity(0.08, ft.Colors.WHITE),
-            padding=ft.padding.symmetric(horizontal=12, vertical=6),
+            padding=ft.Padding.symmetric(horizontal=12, vertical=6),
             content=ft.Row([
                 ft.Container(bgcolor=_filter_color(o["filter"]), border_radius=4,
-                             padding=ft.padding.symmetric(horizontal=8, vertical=3),
+                             padding=ft.Padding.symmetric(horizontal=8, vertical=3),
                              content=ft.Text(o["filter"], size=13,
                                              weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE)),
                 ft.Text(f'{o["exp_time"]}s', size=13),
@@ -392,9 +483,17 @@ def main(page: ft.Page):
 
 
 
+    def _toggle_enabled(idx, value):
+        state["targets"][idx]["enabled"] = value
+        _auto_save()
+        rebuild_cards() 
+        page.update()
+
     def build_target_card(idx, target):
         priority = target.get("priority", "Normal")
         mag_display = str(target.get("mag", "")) if target.get("mag") else "\u2014"
+        is_enabled = target.get("enabled", True)
+        opacity = 1.0 if is_enabled else 0.5
 
         obs_chips = ft.Row(
             [_make_obs_chip(o) for o in target.get("observations", [])],
@@ -411,7 +510,7 @@ def main(page: ft.Page):
         if state["telescope"] == "LOT" and target.get("program"):
             program_ctrls = [
                 ft.Container(bgcolor=ft.Colors.TEAL_700, border_radius=8,
-                             padding=ft.padding.symmetric(horizontal=8, vertical=3),
+                             padding=ft.Padding.symmetric(horizontal=8, vertical=3),
                              content=ft.Text(target["program"], size=11, color=ft.Colors.WHITE,
                                              weight=ft.FontWeight.BOLD)),
             ]
@@ -421,12 +520,13 @@ def main(page: ft.Page):
             note_ctrls = [ft.Text(f"Note: {target['note']}", size=12,
                                    color=ft.Colors.GREY_400, italic=True)]
 
-        return ft.Card(elevation=3, content=ft.Container(padding=16, content=ft.Column([
+        return ft.Card(elevation=3, content=ft.Container(padding=16, opacity=opacity, content=ft.Column([
             ft.Row([
+                ft.Switch(value=is_enabled, on_change=lambda e: _toggle_enabled(idx, e.control.value)),
                 ft.Text(f"#{idx+1}", size=14, color=ft.Colors.GREY_500, weight=ft.FontWeight.BOLD),
                 ft.Text(target["name"], size=18, weight=ft.FontWeight.BOLD, expand=True),
                 ft.Container(bgcolor=_priority_color(priority), border_radius=12,
-                             padding=ft.padding.symmetric(horizontal=10, vertical=3),
+                             padding=ft.Padding.symmetric(horizontal=10, vertical=3),
                              content=ft.Text(priority, size=11, color=ft.Colors.WHITE,
                                              weight=ft.FontWeight.BOLD)),
                 ft.IconButton(ft.Icons.ARROW_UPWARD, icon_size=18, tooltip="Move Up",
@@ -455,7 +555,7 @@ def main(page: ft.Page):
                 *repeat_ctrls,
                 *program_ctrls,
             ], spacing=5),
-            ft.Container(margin=ft.margin.only(top=6), content=obs_chips),
+            ft.Container(margin=ft.Margin.only(top=6), content=obs_chips),
             *note_ctrls,
         ], spacing=6)))
 
@@ -534,8 +634,8 @@ def main(page: ft.Page):
     def _goto_settings_from_editor():
         editor_dlg.open = False
         page.update()
-        nav_rail.selected_index = 3
-        switch_view(3)
+        nav_rail.selected_index = 0
+        switch_view(0)
 
     def _refresh_program_options():
         """Refresh all program dropdowns with current lot_programs list."""
@@ -819,6 +919,119 @@ def main(page: ft.Page):
     )
 
     # ── Home view ──
+    web_status = ft.Text("", size=12, italic=True, color=ft.Colors.GREY_400)
+    update_status = ft.Text("", size=12, italic=True, color=ft.Colors.GREY_400)
+
+    def _do_check_update(on_complete=None):
+        """Check GitHub for a newer release in background."""
+        update_status.value = "Checking for updates..."
+        update_status.color = ft.Colors.GREY_400
+        page.update()
+
+        def _worker():
+            try:
+                latest, release_url = _fetch_latest_release()
+                if _version_tuple(latest) > _version_tuple(APP_VERSION):
+                    update_status.value = f"New version v{latest} available! "
+                    update_status.color = ft.Colors.ORANGE_400
+                    # Attach clickable link via snackbar
+                    page.snack_bar = ft.SnackBar(
+                        content=ft.Row([
+                            ft.Text(f"Update v{latest} available — "),
+                            ft.TextButton("Open Release",
+                                          on_click=lambda e: page.launch_url(release_url)),
+                        ]),
+                        bgcolor=ft.Colors.ORANGE_900,
+                        duration=8000,
+                    )
+                    page.snack_bar.open = True
+                else:
+                    update_status.value = f"v{APP_VERSION} — up to date"
+                    update_status.color = ft.Colors.GREEN_400
+            except Exception as ex:
+                update_status.value = f"Update check failed: {ex}"
+                update_status.color = ft.Colors.GREY_600
+            if on_complete:
+                on_complete()
+            page.update()
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    # ── Periodic update scheduler ──
+    _scheduler_stop = threading.Event()
+
+    def _start_update_scheduler():
+        """Kill any existing scheduler thread and start a new one based on current freq setting."""
+        _scheduler_stop.set()          # stop previous thread
+        _scheduler_stop.clear()        # reset for new thread
+
+        freq = os.getenv("UPDATE_CHECK_FREQ", "startup")
+
+        def _loop():
+            # Always do one check at start (covers 'startup' and initial fire for periodic modes)
+            _do_check_update()
+            if freq in ("daily", "weekly", "monthly"):
+                while not _scheduler_stop.is_set():
+                    nxt = _next_check_time(freq)
+                    while not _scheduler_stop.is_set():
+                        remaining = nxt - time.time()
+                        if remaining <= 0:
+                            break
+                        time.sleep(min(60, remaining))  # wake every minute to check stop signal
+                    if not _scheduler_stop.is_set():
+                        _do_check_update()
+
+        threading.Thread(target=_loop, daemon=True).start()
+
+    def _do_web_fetch():
+        """Fetches from API, updates existing, adds new, conditionally disables targets not from API."""
+        api_key = os.getenv("KINDER_WEB_API", "").strip()
+        if not api_key:
+            snack("Kinder Web API key not set. Go to Home (Settings).", ft.Colors.ORANGE)
+            return
+        telescope = state["telescope"]
+        web_status.value = "Fetching from web..."
+        web_status.color = ft.Colors.YELLOW_400
+        page.update()
+
+        def _worker():
+            try:
+                new_targets = _fetch_web_targets(telescope, api_key)
+                
+                # Mirror API: update/add from API, disable targets not in API
+                api_map = {t["name"]: t for t in new_targets}
+                local_map = {t["name"]: i for i, t in enumerate(state["targets"])}
+                added, updated, disabled = 0, 0, 0
+                for name, api_t in api_map.items():
+                    if name in local_map:
+                        state["targets"][local_map[name]] = api_t
+                        updated += 1
+                    else:
+                        state["targets"].append(api_t)
+                        added += 1
+                for t in state["targets"]:
+                    if t["name"] not in api_map:
+                        if t.get("enabled", True):
+                            t["enabled"] = False
+                            disabled += 1
+                msg = f"Synced: +{added} new, {updated} updated, {disabled} disabled."
+                
+                _auto_save()
+                rebuild_cards()
+                web_status.value = msg
+                web_status.color = ft.Colors.GREEN_400
+                snack(msg)
+            except Exception as ex:
+                web_status.value = f"Web error: {ex}"
+                web_status.color = ft.Colors.RED_300
+                snack(f"Web fetch error: {ex}", ft.Colors.RED)
+            page.update()
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_sync_from_web(e):
+        _do_web_fetch()
+
     home_view = ft.Container(padding=20, expand=True, content=ft.Column([
         ft.Row([
             ft.Icon(ft.Icons.FOLDER_OPEN, size=18, color=ft.Colors.GREY_400),
@@ -828,10 +1041,15 @@ def main(page: ft.Page):
                           on_click=_on_pick_folder),
         ], spacing=8),
         ft.Row([
+            ft.Button("Sync to Web", icon=ft.Icons.SYNC,
+                      on_click=_on_sync_from_web,
+                      style=ft.ButtonStyle(bgcolor=ft.Colors.BLUE_900, color=ft.Colors.WHITE)),
+            ft.VerticalDivider(width=20),
             ft.Button("Add Target", on_click=lambda e: open_editor(-1)),
             ft.Container(expand=True),
+            web_status,
             home_telescope_dd,
-        ], spacing=10),
+        ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
         ft.Row([
             ft.Container(expand=True),
             auto_save_label,
@@ -917,18 +1135,40 @@ def main(page: ft.Page):
         telescope = gen_telescope_dd.value or state["telescope"]
         IS_LOT = "True" if telescope == "LOT" else "False"
         program = gen_program_dd.value if telescope == "LOT" else ""
-        if not state["targets"]:
-            snack("No targets! Go to Home and add some.", ft.Colors.ORANGE)
+        
+        # Load targets for the selected telescope
+        if telescope != state["telescope"]:
+             # If generating for a different telescope than currently loaded in Home, load from file
+            jp = _json_path(telescope)
+            if os.path.exists(jp):
+                try:
+                    data = load_json_any_version(jp)
+                    targets_to_use = data.get("targets", [])
+                except Exception:
+                    targets_to_use = []
+            else:
+                targets_to_use = []
+        else:
+            targets_to_use = state["targets"]
+
+        if not targets_to_use:
+            snack(f"No targets found for {telescope}!", ft.Colors.ORANGE)
+            return
+
+        # Filter enabled targets
+        enabled_targets = [t for t in targets_to_use if t.get("enabled", True)]
+        if not enabled_targets:
+            snack(f"No enabled targets for {telescope}! Check Home tab switches.", ft.Colors.ORANGE)
             return
 
         # For LOT, filter targets by selected program
         if telescope == "LOT" and program:
-            working_targets = [t for t in state["targets"] if t.get("program") == program]
+            working_targets = [t for t in enabled_targets if t.get("program") == program]
             if not working_targets:
-                snack(f"No targets for program {program}!", ft.Colors.ORANGE)
+                snack(f"No enabled targets for program {program}!", ft.Colors.ORANGE)
                 return
         else:
-            working_targets = list(state["targets"])
+            working_targets = list(enabled_targets)
 
         use_rise = sort_mode.value == "rise"
         gen_status.value = "Generating..." + (" (sorting by rise time)" if use_rise else "")
@@ -953,9 +1193,13 @@ def main(page: ft.Page):
                     target_list.append(obs.create_ephem_target(t["name"], ra_hms, dec_dms))
                 except Exception:
                     pass
-            # Insert note as ACP comment before this target's script
+            # Insert note and program as ACP comment before this target's script
             note = t.get("note", "").strip()
-            if note:
+            program = t.get("program", "").strip()
+            
+            if program and note:
+                script += f";{safe_name} Program {program}: {note}\n"
+            elif note:
                 script += f";{safe_name}: {note}\n"
             if v1["Exp_By_Mag"] == "True":
                 script += tri.generate_script(
@@ -1046,10 +1290,8 @@ def main(page: ft.Page):
         expand=True,
     )
     def _build_send_message(telescope="{telescope}", program="{program}"):
-        return (f"您好，若天氣允許，以下是今日的觀測目標:\n"
-                f"使用 {telescope} 觀測計劃 {program}\n"
-                "If the weather permits, here are today's observation targets:\n"
-                f"Use {telescope} with {program} program\n")
+        return (f"您好，若天氣允許使用 {telescope}，以下是今日的觀測目標:\n"
+                f"If the weather permits to use {telescope}, here are today's observation targets:\n")
 
     send_message_field = ft.TextField(
         label="Message to send (editable)",
@@ -1125,6 +1367,9 @@ def main(page: ft.Page):
                 if os.path.exists(jp):
                     data = load_json_any_version(jp)
                     plot_targets = data["targets"]
+                    # Filter enabled targets (default to True if key missing)
+                    plot_targets = [t for t in plot_targets if t.get("enabled", True)]
+                    
                     if tel == "LOT" and prog and prog != "normal":
                         plot_targets = [t for t in plot_targets if t.get("program") == prog]
                     target_list = []
@@ -1187,9 +1432,75 @@ def main(page: ft.Page):
                 # Upload image
                 if state["img_path"] and os.path.exists(state["img_path"]):
                     client.files_upload_v2(channel=channel, file=state["img_path"])
-                send_status.value = "Sent successfully!"
-                send_status.color = ft.Colors.GREEN
-                snack("Sent to control room!")
+                
+                # --- Post Observation Logs to Web API ---
+                api_key = os.getenv("KINDER_WEB_API", "").strip()
+                if sf and os.path.exists(sf) and api_key:
+                    import urllib.request as _req
+                    import json as _json
+                    try:
+                        base_name = os.path.splitext(os.path.basename(sf))[0]
+                        parts = base_name.replace("script_", "", 1).split("_", 1)
+                        tel = parts[0] if parts else "SLT"
+                        prog = parts[1] if len(parts) > 1 else "normal"
+                        
+                        jp = _json_path(tel)
+                        if os.path.exists(jp):
+                            data = load_json_any_version(jp)
+                            targets = [t for t in data.get("targets", []) if t.get("enabled", True)]
+                            if tel == "LOT" and prog and prog != "normal":
+                                targets = [t for t in targets if t.get("program") == prog]
+                            
+                            obs_date = datetime.now().strftime("%Y-%m-%d")
+                            headers = {
+                                "X-API-Key": api_key,
+                                "Content-Type": "application/json",
+                                "Accept": "application/json"
+                            }
+                            
+                            sent_count = 0
+                            url = f"{KINDER_WEB_BASE_URL}/api/v1/observation_logs"
+                            for t in targets:
+                                obs_list = t.get("observations", [])
+                                formatted_filters = []
+                                for o in obs_list:
+                                    formatted_filters.append({
+                                        "filter": str(o.get("filter", "")),
+                                        "exp": int(o.get("exp_time", 0)),
+                                        "count": int(o.get("count", 0))
+                                    })
+                                
+                                payload = {
+                                    "target_name": t.get("name", ""),
+                                    "telescope": tel,
+                                    "obs_date": obs_date,
+                                    "is_triggered": True,
+                                    "trigger_filter": formatted_filters if formatted_filters else "",
+                                    "trigger_exp": None,
+                                    "trigger_count": None,
+                                    "is_observed": False,
+                                    "observed_filter": None,
+                                    "observed_exp": None,
+                                    "observed_count": None,
+                                }
+                                json_data = _json.dumps(payload).encode("utf-8")
+                                req = _req.Request(url, data=json_data, headers=headers, method="POST")
+                                with _req.urlopen(req, timeout=5) as resp:
+                                    sent_count += 1
+                            
+                            send_status.value = f"Success & Updated {sent_count} API logs!"
+                            send_status.color = ft.Colors.GREEN
+                            snack(f"Sent to control room & logged {sent_count} targets!")
+                    except Exception as le:
+                        print(f"Log API error: {le}")
+                        send_status.value = "Sent (Log API Error)"
+                        send_status.color = ft.Colors.ORANGE
+                        snack(f"Sent, but API log failed: {le}", ft.Colors.ORANGE)
+                else:
+                    send_status.value = "Sent successfully!"
+                    send_status.color = ft.Colors.GREEN
+                    snack("Sent to control room!")
+                    
             except Exception as ex:
                 send_status.value = f"Error: {ex}"
                 send_status.color = ft.Colors.RED_300
@@ -1261,6 +1572,22 @@ def main(page: ft.Page):
         label="Slack Channel ID", width=550,
         value=os.getenv("SLACK_CHANNEL_ID_CONTROL_ROOM", ""),
     )
+    set_kinder_web_api = ft.TextField(
+        label="Kinder Web API Key", password=True, can_reveal_password=True,
+        width=550, value=os.getenv("KINDER_WEB_API", ""),
+    )
+    _UPDATE_FREQ_OPTIONS = [
+        ("startup",  "On startup only"),
+        ("daily",    "Every day at 00:00"),
+        ("weekly",   "Every Monday at 00:00"),
+        ("monthly",  "Every 1st of the month at 00:00"),
+        ("never",    "Never"),
+    ]
+    set_update_freq = ft.Dropdown(
+        label="Auto-check for updates", width=300,
+        options=[ft.dropdown.Option(key=k, text=v) for k, v in _UPDATE_FREQ_OPTIONS],
+        value=os.getenv("UPDATE_CHECK_FREQ", "startup"),
+    )
     set_status = ft.Text("")
 
     # ── LOT Programs management ──
@@ -1309,10 +1636,14 @@ def main(page: ft.Page):
     def _on_save_settings(e):
         token = set_token.value.strip()
         channel = set_channel.value.strip()
+        kinder_web_api = set_kinder_web_api.value.strip()
+        freq = set_update_freq.value or "startup"
         try:
-            _save_env(token, channel)
+            _save_env(token, channel, kinder_web_api)
+            _save_env_vars({"UPDATE_CHECK_FREQ": freq})
             set_status.value = f"Saved to {ENV_FILE}"
             snack("Settings saved to .env")
+            _start_update_scheduler()  # restart with new frequency
         except Exception as ex:
             set_status.value = f"Error: {ex}"
             snack(f"Save error: {ex}", ft.Colors.RED)
@@ -1341,6 +1672,8 @@ def main(page: ft.Page):
         _ensure_env_file()
         set_token.value = os.getenv("SLACK_BOT_TOKEN", "")
         set_channel.value = os.getenv("SLACK_CHANNEL_ID_CONTROL_ROOM", "")
+        set_kinder_web_api.value = os.getenv("KINDER_WEB_API", "")
+        set_update_freq.value = os.getenv("UPDATE_CHECK_FREQ", "startup")
         set_status.value = "Reloaded from .env"
         page.update()
         snack("Settings reloaded from .env")
@@ -1370,6 +1703,11 @@ def main(page: ft.Page):
                 color=ft.Colors.GREY_400, italic=True),
         set_token,
         set_channel,
+        ft.Divider(),
+        ft.Text("Kinder Web API", size=18, weight=ft.FontWeight.W_500),
+        ft.Text("API key for Kinder web service", size=13,
+                color=ft.Colors.GREY_400, italic=True),
+        set_kinder_web_api,
         ft.Row([
             ft.Button("Save to .env", icon=ft.Icons.SAVE, on_click=_on_save_settings),
             ft.Button("Reload .env", icon=ft.Icons.REFRESH, on_click=_on_reload_settings),
@@ -1377,7 +1715,14 @@ def main(page: ft.Page):
         set_status,
         ft.Divider(),
         ft.Text("About", size=18, weight=ft.FontWeight.W_500),
-        ft.Text("Kinder Trigger - Cross-platform Observation Trigger", size=14),
+        ft.Row([
+            ft.Text(f"Kinder Trigger  v{APP_VERSION}", size=14, weight=ft.FontWeight.W_500),
+            ft.Button("Check for Updates", icon=ft.Icons.SYSTEM_UPDATE_ALT,
+                      on_click=lambda e: _do_check_update()),
+            update_status,
+        ], spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+        set_update_freq,
+        ft.Text("Cross-platform Observation Trigger", size=13, color=ft.Colors.GREY_400),
         ft.Text("Platforms: Windows, macOS, Linux, iOS, Android, Web", size=13,
                 color=ft.Colors.GREY_400),
         ft.Text("Telescopes: LOT / SLT", size=13, color=ft.Colors.GREY_400),
@@ -1391,20 +1736,20 @@ def main(page: ft.Page):
     #  Navigation  —  Home(0), Script(1), Send(2), Settings(3)
     # ═════════════════════════════════════════════════════════════════════════
     content_area = ft.Container(expand=True)
-    views = [home_view, script_view, send_view, settings_view]
+    views = [settings_view, home_view, script_view, send_view]
 
     def switch_view(idx):
         if idx == 0:
+            set_data_path_label.value = _get_data_path()
+        elif idx == 1:
             home_telescope_dd.value = state["telescope"]
             data_path_label.value = _get_data_path()
             auto_save_label.value = f"Auto-saved to {os.path.basename(_json_path(state['telescope']))}"
-        elif idx == 1:
+        elif idx == 2:
             gen_telescope_dd.value = state["telescope"]
             gen_program_dd.visible = state["telescope"] == "LOT"
-        elif idx == 2:
-            _refresh_script_list()
         elif idx == 3:
-            set_data_path_label.value = _get_data_path()
+            _refresh_script_list()
         content_area.content = views[idx]
         page.update()
 
@@ -1414,10 +1759,10 @@ def main(page: ft.Page):
     is_mobile = page.platform in (ft.PagePlatform.ANDROID, ft.PagePlatform.IOS)
 
     nav_dests = [
-        ("Home", ft.Icons.HOME),
+        ("Home", ft.Icons.SETTINGS),
+        ("Targets", ft.Icons.EXPLORE),
         ("Script", ft.Icons.CODE),
         ("Send", ft.Icons.SEND),
-        ("Settings", ft.Icons.SETTINGS),
     ]
 
     # ── Load logo for sidebar (from assets/ directory) ──
@@ -1426,7 +1771,7 @@ def main(page: ft.Page):
         label_type=ft.NavigationRailLabelType.ALL,
         min_width=80, min_extended_width=180,
         leading=ft.Container(
-            padding=ft.padding.only(top=10, bottom=6),
+            padding=ft.Padding.only(top=10, bottom=6),
             content=ft.Image(src="Kinder_light.png", width=60, fit=ft.BoxFit.CONTAIN),
         ),
         destinations=[ft.NavigationRailDestination(icon=ic, label=lb) for lb, ic in nav_dests],
@@ -1442,6 +1787,8 @@ def main(page: ft.Page):
     # ── Init ──
     rebuild_cards()
     switch_view(0)
+    # Start update scheduler (also fires an immediate startup check)
+    _start_update_scheduler()
 
     if is_mobile:
         page.navigation_bar = nav_bar

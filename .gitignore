@@ -194,3 +194,7 @@ assets/icon.png
 .vscode/settings.json
 .vscode/
 plot/
+client*
+credentials.json
+main_testing.py
+exp_time_cal.py
