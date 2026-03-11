@@ -200,3 +200,7 @@ main_testing.py
 exp_time_cal.py
 .tmp.driveupload/
 .git 2/
+build/
+build_output/
+dist/
+build
