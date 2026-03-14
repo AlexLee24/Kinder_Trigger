@@ -2,7 +2,6 @@ import flet as ft
 import json
 import os
 import re
-import base64
 import copy
 import time
 from datetime import datetime, timedelta
@@ -38,7 +37,8 @@ DEFAULT_LOT_PROGRAMS = ["R01"]
 APP_TITLE = "Kinder Trigger"
 APP_VERSION = "1.0.1"
 GITHUB_REPO = "AlexLee24/Kinder_Trigger"
-KINDER_WEB_BASE_URL = "https://kinder.astro.ncu.edu.tw" 
+# KINDER_WEB_BASE_URL = "https://kinder.astro.ncu.edu.tw" 
+KINDER_WEB_BASE_URL = "http://127.0.0.1:8000" 
 SCRIPT_FILE = "script.txt"
 # Use ~/.kinder_trigger/ for config so packaged app finds it reliably
 _CONFIG_DIR = os.path.join(str(Path.home()), ".kinder_trigger")
@@ -382,9 +382,9 @@ def main(page: ft.Page):
     page.theme_mode = ft.ThemeMode.DARK
     page.window.width = 1100
     page.window.height = 800
+    page.window.icon = "Kinder_dark_jpg.jpg"
     
     page.update()
-    page.window.center()
     page.update()
     page.padding = 0
 
@@ -402,9 +402,72 @@ def main(page: ft.Page):
         "last_script_path": "",
     }
 
+    _button_busy_state = {}
+    _current_busy_control = {"v": None}
+
+    def _set_button_busy(control, is_busy, text="Running..."):
+        if control is None or not hasattr(control, "disabled"):
+            return
+
+        key = id(control)
+        if is_busy:
+            if key in _button_busy_state:
+                return
+            _button_busy_state[key] = {
+                "text": getattr(control, "text", None),
+                "icon": getattr(control, "icon", None),
+                "content": getattr(control, "content", None),
+                "disabled": control.disabled,
+            }
+            if isinstance(control, ft.Button):
+                label = _button_busy_state[key]["text"] or text
+                control.text = None
+                control.icon = None
+                control.content = ft.Row([
+                    ft.ProgressRing(width=14, height=14, stroke_width=2),
+                    ft.Text(label, size=12),
+                ], spacing=6, alignment=ft.MainAxisAlignment.CENTER)
+            control.disabled = True
+            return
+
+        old = _button_busy_state.pop(key, None)
+        if old is None:
+            return
+        if isinstance(control, ft.Button):
+            control.content = old["content"]
+            control.text = old["text"]
+            control.icon = old["icon"]
+        control.disabled = old["disabled"]
+
+    def _set_busy(is_busy, text="Running...", control=None):
+        if is_busy:
+            _current_busy_control["v"] = control
+            _set_button_busy(control, True, text)
+        else:
+            _set_button_busy(_current_busy_control["v"], False, text)
+            _current_busy_control["v"] = None
+        page.update()
+
     def snack(msg, color=ft.Colors.GREEN):
         page.snack_bar = ft.SnackBar(ft.Text(msg), bgcolor=color)
         page.snack_bar.open = True
+        page.update()
+
+    app_log_text = ft.TextField(
+        label="Application Log",
+        multiline=True,
+        min_lines=20,
+        max_lines=40,
+        read_only=True,
+        expand=True,
+        text_size=11,
+        text_style=ft.TextStyle(font_family="Courier New"),
+        value="",
+    )
+
+    def _append_app_log(tag, msg):
+        line = f"[{tag}] {msg}"
+        app_log_text.value = (app_log_text.value + line + "\n")[-40000:]
         page.update()
 
     # ── Auto-load JSON by telescope ──
@@ -898,20 +961,24 @@ def main(page: ft.Page):
     folder_picker = ft.FilePicker()
 
     async def _on_pick_folder(e):
+        _set_busy(True, "Selecting folder...", e.control)
         result = await folder_picker.get_directory_path(
             dialog_title="Select Data Folder",
             initial_directory=_get_data_path(),
         )
-        if result is None:
-            return
-        _save_env_vars({"DATA_PATH": result})
-        data_path_label.value = result
-        _ensure_json_files()
-        _load_main_set()
-        rebuild_cards()
-        auto_save_label.value = f"Auto-saved to {os.path.basename(_json_path(state['telescope']))}"
-        page.update()
-        snack(f"Data path set to {result}")
+        try:
+            if result is None:
+                return
+            _save_env_vars({"DATA_PATH": result})
+            data_path_label.value = result
+            _ensure_json_files()
+            _load_main_set()
+            rebuild_cards()
+            auto_save_label.value = f"Auto-saved to {os.path.basename(_json_path(state['telescope']))}"
+            page.update()
+            snack(f"Data path set to {result}")
+        finally:
+            _set_busy(False)
 
     auto_save_label = ft.Text(
         f"Auto-saved to {os.path.basename(_json_path(state['telescope']))}",
@@ -924,6 +991,7 @@ def main(page: ft.Page):
 
     def _do_check_update(on_complete=None):
         """Check GitHub for a newer release in background."""
+        _append_app_log("Check Update", "Checking for updates...")
         update_status.value = "Checking for updates..."
         update_status.color = ft.Colors.GREY_400
         page.update()
@@ -932,6 +1000,7 @@ def main(page: ft.Page):
             try:
                 latest, release_url = _fetch_latest_release()
                 if _version_tuple(latest) > _version_tuple(APP_VERSION):
+                    _append_app_log("Check Update", f"New version available: v{latest}")
                     update_status.value = f"New version v{latest} available! "
                     update_status.color = ft.Colors.ORANGE_400
                     # Attach clickable link via snackbar
@@ -946,9 +1015,11 @@ def main(page: ft.Page):
                     )
                     page.snack_bar.open = True
                 else:
+                    _append_app_log("Check Update", f"Up to date: v{APP_VERSION}")
                     update_status.value = f"v{APP_VERSION} — up to date"
                     update_status.color = ft.Colors.GREEN_400
             except Exception as ex:
+                _append_app_log("Check Update", f"Failed: {ex}")
                 update_status.value = f"Update check failed: {ex}"
                 update_status.color = ft.Colors.GREY_600
             if on_complete:
@@ -983,12 +1054,14 @@ def main(page: ft.Page):
 
         threading.Thread(target=_loop, daemon=True).start()
 
-    def _do_web_fetch():
+    def _do_web_fetch(trigger_control=None):
         """Fetches from API, updates existing, adds new, conditionally disables targets not from API."""
         api_key = os.getenv("KINDER_WEB_API", "").strip()
         if not api_key:
             snack("Kinder Web API key not set. Go to Home (Settings).", ft.Colors.ORANGE)
             return
+        _set_busy(True, "Syncing targets from API...", trigger_control)
+        _append_app_log("Sync", f"Start sync for {state['telescope']}")
         telescope = state["telescope"]
         web_status.value = "Fetching from web..."
         web_status.color = ft.Colors.YELLOW_400
@@ -1020,17 +1093,21 @@ def main(page: ft.Page):
                 rebuild_cards()
                 web_status.value = msg
                 web_status.color = ft.Colors.GREEN_400
+                _append_app_log("Sync", msg)
                 snack(msg)
             except Exception as ex:
                 web_status.value = f"Web error: {ex}"
                 web_status.color = ft.Colors.RED_300
+                _append_app_log("Sync", f"Error: {ex}")
                 snack(f"Web fetch error: {ex}", ft.Colors.RED)
+            finally:
+                _set_busy(False)
             page.update()
 
         threading.Thread(target=_worker, daemon=True).start()
 
     def _on_sync_from_web(e):
-        _do_web_fetch()
+        _do_web_fetch(e.control)
 
     home_view = ft.Container(padding=20, expand=True, content=ft.Column([
         ft.Row([
@@ -1132,9 +1209,11 @@ def main(page: ft.Page):
             return targets
 
     def _on_generate(e):
+        _set_busy(True, "Generating script...", e.control)
         telescope = gen_telescope_dd.value or state["telescope"]
         IS_LOT = "True" if telescope == "LOT" else "False"
         program = gen_program_dd.value if telescope == "LOT" else ""
+        _append_app_log("Generate", f"Start generate for telescope={telescope}, program={program or 'normal'}")
         
         # Load targets for the selected telescope
         if telescope != state["telescope"]:
@@ -1153,12 +1232,16 @@ def main(page: ft.Page):
 
         if not targets_to_use:
             snack(f"No targets found for {telescope}!", ft.Colors.ORANGE)
+            _append_app_log("Generate", f"No targets found for {telescope}")
+            _set_busy(False)
             return
 
         # Filter enabled targets
         enabled_targets = [t for t in targets_to_use if t.get("enabled", True)]
         if not enabled_targets:
             snack(f"No enabled targets for {telescope}! Check Home tab switches.", ft.Colors.ORANGE)
+            _append_app_log("Generate", f"No enabled targets for {telescope}")
+            _set_busy(False)
             return
 
         # For LOT, filter targets by selected program
@@ -1166,6 +1249,8 @@ def main(page: ft.Page):
             working_targets = [t for t in enabled_targets if t.get("program") == program]
             if not working_targets:
                 snack(f"No enabled targets for program {program}!", ft.Colors.ORANGE)
+                _append_app_log("Generate", f"No enabled targets for program {program}")
+                _set_busy(False)
                 return
         else:
             working_targets = list(enabled_targets)
@@ -1234,9 +1319,7 @@ def main(page: ft.Page):
                 plot_dst = os.path.join(plot_dir, plot_name)
                 img_path = tri.generate_img(current_day, target_list, plot_path=plot_dst)
                 state["img_path"] = img_path
-                with open(img_path, "rb") as imgf:
-                    b64 = base64.b64encode(imgf.read()).decode()
-                    obs_image.src = f"data:image/png;base64,{b64}"
+                obs_image.src = img_path
                 obs_image.visible = True
             except Exception as ex:
                 gen_status.value = f"Plot error: {ex}"
@@ -1246,14 +1329,18 @@ def main(page: ft.Page):
 
         gen_status.value = f"Done \u2014 {len(sorted_targets)} targets \u2192 saved to {fname}"
         page.update()
+        _append_app_log("Generate", f"Done: {len(sorted_targets)} targets saved to {fname}")
         snack(f"Script generated and saved to {fname}!")
+        _set_busy(False)
 
     def _on_copy_script(e):
+        _set_busy(True, "Copying script...", e.control)
         if state["script"]:
             page.set_clipboard(state["script"])
             snack("Copied to clipboard!")
         else:
             snack("Generate a script first.", ft.Colors.ORANGE)
+        _set_busy(False)
 
     script_view = ft.Container(padding=20, expand=True, content=ft.Column([
         ft.Text("Script Generator", size=28, weight=ft.FontWeight.BOLD),
@@ -1338,64 +1425,83 @@ def main(page: ft.Page):
             send_script_dd.value = None
 
     def _on_load_script(e):
-        chosen = send_script_dd.value
-        if not chosen:
-            snack("No script file selected.", ft.Colors.ORANGE)
-            return
-        sf = os.path.join(_get_data_path(), chosen)
-        if not os.path.exists(sf):
-            snack(f"{chosen} not found.", ft.Colors.ORANGE)
-            return
-        with open(sf, "r", encoding="utf-8") as f:
-            content = f.read()
-        send_script_preview.value = content
-        state["script"] = content
-        state["last_script_path"] = sf
+        _set_busy(True, "Loading script...", e.control)
+        try:
+            chosen = send_script_dd.value
+            if not chosen:
+                snack("No script file selected.", ft.Colors.ORANGE)
+                return
+            sf = os.path.join(_get_data_path(), chosen)
+            if not os.path.exists(sf):
+                snack(f"{chosen} not found.", ft.Colors.ORANGE)
+                return
+            with open(sf, "r", encoding="utf-8") as f:
+                content = f.read()
+            send_script_preview.value = content
+            state["script"] = content
+            state["last_script_path"] = sf
 
-        # Parse telescope/program from filename like script_SLT.txt or script_LOT_R01.txt
-        base = os.path.splitext(chosen)[0]          # e.g. "script_SLT" or "script_LOT_R01"
-        parts = base.replace("script_", "", 1).split("_", 1)  # ["SLT"] or ["LOT", "R01"]
-        tel = parts[0] if parts else "{telescope}"
+            # Parse telescope/program from filename like script_SLT.txt or script_LOT_R01.txt
+            base = os.path.splitext(chosen)[0]          # e.g. "script_SLT" or "script_LOT_R01"
+            parts = base.replace("script_", "", 1).split("_", 1)  # ["SLT"] or ["LOT", "R01"]
+            tel = parts[0] if parts else "{telescope}"
+            prog = parts[1] if len(parts) > 1 else "normal"
+            send_message_field.value = _build_send_message(tel, prog)
+
+            # Regenerate observation plot from current targets
+            send_img_preview.visible = False
+            if HAS_PLOTTING:
+                try:
+                    jp = _json_path(tel)
+                    if os.path.exists(jp):
+                        data = load_json_any_version(jp)
+                        plot_targets = data["targets"]
+                        # Filter enabled targets (default to True if key missing)
+                        plot_targets = [t for t in plot_targets if t.get("enabled", True)]
+
+                        if tel == "LOT" and prog and prog != "normal":
+                            plot_targets = [t for t in plot_targets if t.get("program") == prog]
+                        target_list = []
+                        for t in plot_targets:
+                            try:
+                                target_list.append(obs.create_ephem_target(
+                                    t["name"], _ensure_hms(t["ra"]), _ensure_dms(t["dec"])))
+                            except Exception:
+                                pass
+                        if target_list:
+                            plot_dir = os.path.join(_get_data_path(), "plot")
+                            os.makedirs(plot_dir, exist_ok=True)
+                            plot_name = f"obv_plot_{tel}_{prog}.jpg" if prog and prog != "normal" else f"obv_plot_{tel}.jpg"
+                            plot_dst = os.path.join(plot_dir, plot_name)
+                            current_day = datetime.now().strftime("%Y-%m-%d")
+                            img_path = tri.generate_img(current_day, target_list, plot_path=plot_dst)
+                            state["img_path"] = img_path
+                            send_img_preview.src = img_path
+                            send_img_preview.visible = True
+                except Exception:
+                    pass
+
+            page.update()
+            snack(f"Loaded {chosen} ({len(content)} chars)")
+        finally:
+            _set_busy(False)
+
+    def _append_send_log(msg):
+        _append_app_log("Send", msg)
+
+    def _targets_for_script(sf):
+        base_name = os.path.splitext(os.path.basename(sf))[0]
+        parts = base_name.replace("script_", "", 1).split("_", 1)
+        tel = parts[0] if parts else "SLT"
         prog = parts[1] if len(parts) > 1 else "normal"
-        send_message_field.value = _build_send_message(tel, prog)
-
-        # Regenerate observation plot from current targets
-        send_img_preview.visible = False
-        if HAS_PLOTTING:
-            try:
-                jp = _json_path(tel)
-                if os.path.exists(jp):
-                    data = load_json_any_version(jp)
-                    plot_targets = data["targets"]
-                    # Filter enabled targets (default to True if key missing)
-                    plot_targets = [t for t in plot_targets if t.get("enabled", True)]
-                    
-                    if tel == "LOT" and prog and prog != "normal":
-                        plot_targets = [t for t in plot_targets if t.get("program") == prog]
-                    target_list = []
-                    for t in plot_targets:
-                        try:
-                            target_list.append(obs.create_ephem_target(
-                                t["name"], _ensure_hms(t["ra"]), _ensure_dms(t["dec"])))
-                        except Exception:
-                            pass
-                    if target_list:
-                        plot_dir = os.path.join(_get_data_path(), "plot")
-                        os.makedirs(plot_dir, exist_ok=True)
-                        plot_name = f"obv_plot_{tel}_{prog}.jpg" if prog and prog != "normal" else f"obv_plot_{tel}.jpg"
-                        plot_dst = os.path.join(plot_dir, plot_name)
-                        current_day = datetime.now().strftime("%Y-%m-%d")
-                        img_path = tri.generate_img(current_day, target_list, plot_path=plot_dst)
-                        state["img_path"] = img_path
-                        with open(img_path, "rb") as imgf:
-                            b64 = base64.b64encode(imgf.read()).decode()
-                            send_img_preview.src = f"data:image/png;base64,{b64}"
-                        send_img_preview.visible = True
-            except Exception:
-                pass
-
-        page.update()
-        snack(f"Loaded {chosen} ({len(content)} chars)")
+        jp = _json_path(tel)
+        if not os.path.exists(jp):
+            return tel, prog, []
+        data = load_json_any_version(jp)
+        targets = [t for t in data.get("targets", []) if t.get("enabled", True)]
+        if tel == "LOT" and prog and prog != "normal":
+            targets = [t for t in targets if t.get("program") == prog]
+        return tel, prog, targets
 
     def _set_sending(is_sending):
         send_btn.disabled = is_sending
@@ -1420,90 +1526,84 @@ def main(page: ft.Page):
             return
 
         _set_sending(True)
+        _append_send_log("Send flow started")
 
         def _send_worker():
             try:
-                client = WebClient(token=token)
-                client.chat_postMessage(channel=channel, text=msg)
-                # Upload script file
                 sf = state.get("last_script_path", os.path.join(_get_data_path(), SCRIPT_FILE))
-                if sf and os.path.exists(sf):
-                    client.files_upload_v2(channel=channel, file=sf)
-                # Upload image
-                if state["img_path"] and os.path.exists(state["img_path"]):
-                    client.files_upload_v2(channel=channel, file=state["img_path"])
-                
-                # --- Post Observation Logs to Web API ---
+                api_logged_count = 0
+
+                # --- Post Observation Logs to Web API first ---
                 api_key = os.getenv("KINDER_WEB_API", "").strip()
                 if sf and os.path.exists(sf) and api_key:
                     import urllib.request as _req
                     import json as _json
                     try:
-                        base_name = os.path.splitext(os.path.basename(sf))[0]
-                        parts = base_name.replace("script_", "", 1).split("_", 1)
-                        tel = parts[0] if parts else "SLT"
-                        prog = parts[1] if len(parts) > 1 else "normal"
-                        
-                        jp = _json_path(tel)
-                        if os.path.exists(jp):
-                            data = load_json_any_version(jp)
-                            targets = [t for t in data.get("targets", []) if t.get("enabled", True)]
-                            if tel == "LOT" and prog and prog != "normal":
-                                targets = [t for t in targets if t.get("program") == prog]
-                            
-                            obs_date = datetime.now().strftime("%Y-%m-%d")
-                            headers = {
-                                "X-API-Key": api_key,
-                                "Content-Type": "application/json",
-                                "Accept": "application/json"
+                        tel, prog, targets = _targets_for_script(sf)
+                        obs_date = datetime.now().strftime("%Y-%m-%d")
+                        headers = {
+                            "X-API-Key": api_key,
+                            "Content-Type": "application/json",
+                            "Accept": "application/json"
+                        }
+                        _append_send_log(f"API start: telescope={tel}, program={prog}, targets={len(targets)}")
+                        url = f"{KINDER_WEB_BASE_URL}/api/v1/observation_logs"
+                        for t in targets:
+                            obs_list = t.get("observations", [])
+                            formatted_filters = []
+                            for o in obs_list:
+                                formatted_filters.append({
+                                    "filter": str(o.get("filter", "")),
+                                    "exp": int(o.get("exp_time", 0)),
+                                    "count": int(o.get("count", 0))
+                                })
+
+                            payload = {
+                                "target_name": t.get("name", ""),
+                                "telescope": tel,
+                                "obs_date": obs_date,
+                                "priority": t.get("priority", "Normal"),
+                                "is_triggered": True,
+                                "trigger_filter": formatted_filters if formatted_filters else "",
+                                "trigger_exp": None,
+                                "trigger_count": None,
+                                "is_observed": False,
+                                "observed_filter": None,
+                                "observed_exp": None,
+                                "observed_count": None,
                             }
-                            
-                            sent_count = 0
-                            url = f"{KINDER_WEB_BASE_URL}/api/v1/observation_logs"
-                            for t in targets:
-                                obs_list = t.get("observations", [])
-                                formatted_filters = []
-                                for o in obs_list:
-                                    formatted_filters.append({
-                                        "filter": str(o.get("filter", "")),
-                                        "exp": int(o.get("exp_time", 0)),
-                                        "count": int(o.get("count", 0))
-                                    })
-                                
-                                payload = {
-                                    "target_name": t.get("name", ""),
-                                    "telescope": tel,
-                                    "obs_date": obs_date,
-                                    "is_triggered": True,
-                                    "trigger_filter": formatted_filters if formatted_filters else "",
-                                    "trigger_exp": None,
-                                    "trigger_count": None,
-                                    "is_observed": False,
-                                    "observed_filter": None,
-                                    "observed_exp": None,
-                                    "observed_count": None,
-                                }
-                                json_data = _json.dumps(payload).encode("utf-8")
-                                req = _req.Request(url, data=json_data, headers=headers, method="POST")
-                                with _req.urlopen(req, timeout=5) as resp:
-                                    sent_count += 1
-                            
-                            send_status.value = f"Success & Updated {sent_count} API logs!"
-                            send_status.color = ft.Colors.GREEN
-                            snack(f"Sent to control room & logged {sent_count} targets!")
+                            json_data = _json.dumps(payload).encode("utf-8")
+                            req = _req.Request(url, data=json_data, headers=headers, method="POST")
+                            with _req.urlopen(req, timeout=5):
+                                api_logged_count += 1
+                            _append_send_log(f"API OK: {t.get('name', '')}")
                     except Exception as le:
-                        print(f"Log API error: {le}")
-                        send_status.value = "Sent (Log API Error)"
-                        send_status.color = ft.Colors.ORANGE
-                        snack(f"Sent, but API log failed: {le}", ft.Colors.ORANGE)
+                        _append_send_log(f"API ERROR: {le}")
                 else:
-                    send_status.value = "Sent successfully!"
-                    send_status.color = ft.Colors.GREEN
-                    snack("Sent to control room!")
+                    _append_send_log("API skipped: missing API key or script file")
+
+                # --- Then send to Slack ---
+                _append_send_log("Slack start")
+                client = WebClient(token=token)
+                client.chat_postMessage(channel=channel, text=msg)
+                _append_send_log("Slack message sent")
+
+                if sf and os.path.exists(sf):
+                    client.files_upload_v2(channel=channel, file=sf)
+                    _append_send_log(f"Slack file uploaded: {os.path.basename(sf)}")
+
+                if state["img_path"] and os.path.exists(state["img_path"]):
+                    client.files_upload_v2(channel=channel, file=state["img_path"])
+                    _append_send_log(f"Slack image uploaded: {os.path.basename(state['img_path'])}")
+
+                send_status.value = f"Sent! API logs: {api_logged_count}"
+                send_status.color = ft.Colors.GREEN
+                snack(f"Sent to control room. API logs: {api_logged_count}")
                     
             except Exception as ex:
                 send_status.value = f"Error: {ex}"
                 send_status.color = ft.Colors.RED_300
+                _append_send_log(f"SEND ERROR: {ex}")
                 snack(f"Send error: {ex}", ft.Colors.RED)
             finally:
                 send_btn.disabled = False
@@ -1514,7 +1614,39 @@ def main(page: ft.Page):
 
     send_btn.on_click = lambda e: _on_send_click(e)
 
+    confirm_targets_title = ft.Text("Targets to send", weight=ft.FontWeight.W_600)
+    confirm_targets_list = ft.Column(spacing=4, scroll=ft.ScrollMode.AUTO, height=220)
+
+    def _prepare_confirm_targets():
+        sf = state.get("last_script_path", "")
+        if (not sf or not os.path.exists(sf)) and send_script_dd.value:
+            sf = os.path.join(_get_data_path(), send_script_dd.value)
+
+        confirm_targets_list.controls.clear()
+        if not sf or not os.path.exists(sf):
+            confirm_targets_title.value = "Targets to send (no script loaded)"
+            return False
+
+        tel, prog, targets = _targets_for_script(sf)
+        confirm_targets_title.value = f"Targets to send ({tel}/{prog}) - {len(targets)}"
+        if not targets:
+            confirm_targets_list.controls.append(
+                ft.Text("No enabled targets found for this script.", color=ft.Colors.ORANGE_300)
+            )
+            return False
+
+        for i, t in enumerate(targets, start=1):
+            confirm_targets_list.controls.append(
+                ft.Text(f"{i}. {t.get('name', '')} | Priority: {t.get('priority', 'Normal')}", size=13)
+            )
+        return True
+
     def _on_send_click(e):
+        ok = _prepare_confirm_targets()
+        if not ok:
+            snack("No valid target list to send. Please load script first.", ft.Colors.ORANGE)
+            page.update()
+            return
         confirm_dlg.open = True
         page.update()
 
@@ -1529,7 +1661,19 @@ def main(page: ft.Page):
 
     confirm_dlg = ft.AlertDialog(
         modal=True, title=ft.Text("Confirm Send"),
-        content=ft.Text("Are you sure you want to send this to Slack control room?"),
+        content=ft.Container(
+            width=700,
+            content=ft.Column([
+                ft.Text("Please double check target list before sending."),
+                confirm_targets_title,
+                ft.Container(
+                    border=ft.border.all(1, ft.Colors.GREY_700),
+                    border_radius=8,
+                    padding=10,
+                    content=confirm_targets_list,
+                ),
+            ], spacing=8),
+        ),
         actions=[
             ft.TextButton("Cancel", on_click=_on_cancel_send),
             ft.Button("Yes, Send", on_click=_on_confirm_send,
@@ -1607,11 +1751,14 @@ def main(page: ft.Page):
             )
 
     def _add_program(e):
+        _set_busy(True, "Adding program...", e.control)
         val = prog_input.value.strip().upper()
         if not val:
+            _set_busy(False)
             return
         if val in lot_programs:
             snack(f"{val} already exists", ft.Colors.ORANGE)
+            _set_busy(False)
             return
         lot_programs.append(val)
         lot_programs.sort()
@@ -1621,8 +1768,10 @@ def main(page: ft.Page):
         _refresh_program_options()
         page.update()
         snack(f"Added program: {val}")
+        _set_busy(False)
 
     def _del_program(prog):
+        _set_busy(True, "Removing program...")
         if prog in lot_programs:
             lot_programs.remove(prog)
             _save_lot_programs(lot_programs)
@@ -1630,10 +1779,12 @@ def main(page: ft.Page):
             _refresh_program_options()
             page.update()
             snack(f"Removed program: {prog}")
+        _set_busy(False)
 
     _build_prog_chips()
 
     def _on_save_settings(e):
+        _set_busy(True, "Saving settings...", e.control)
         token = set_token.value.strip()
         channel = set_channel.value.strip()
         kinder_web_api = set_kinder_web_api.value.strip()
@@ -1648,27 +1799,33 @@ def main(page: ft.Page):
             set_status.value = f"Error: {ex}"
             snack(f"Save error: {ex}", ft.Colors.RED)
         page.update()
+        _set_busy(False)
 
     set_data_path_label = ft.Text(_get_data_path(), size=14, color=ft.Colors.GREY_300)
 
     async def _on_pick_folder_settings(e):
+        _set_busy(True, "Selecting folder...", e.control)
         result = await folder_picker.get_directory_path(
             dialog_title="Select Data Folder",
             initial_directory=_get_data_path(),
         )
-        if result is None:
-            return
-        _save_env_vars({"DATA_PATH": result})
-        data_path_label.value = result
-        set_data_path_label.value = result
-        _ensure_json_files()
-        _load_main_set()
-        rebuild_cards()
-        set_status.value = f"Data path saved to {ENV_FILE}"
-        page.update()
-        snack(f"Data path set to {result}")
+        try:
+            if result is None:
+                return
+            _save_env_vars({"DATA_PATH": result})
+            data_path_label.value = result
+            set_data_path_label.value = result
+            _ensure_json_files()
+            _load_main_set()
+            rebuild_cards()
+            set_status.value = f"Data path saved to {ENV_FILE}"
+            page.update()
+            snack(f"Data path set to {result}")
+        finally:
+            _set_busy(False)
 
     def _on_reload_settings(e):
+        _set_busy(True, "Reloading settings...", e.control)
         _ensure_env_file()
         set_token.value = os.getenv("SLACK_BOT_TOKEN", "")
         set_channel.value = os.getenv("SLACK_CHANNEL_ID_CONTROL_ROOM", "")
@@ -1677,6 +1834,7 @@ def main(page: ft.Page):
         set_status.value = "Reloaded from .env"
         page.update()
         snack("Settings reloaded from .env")
+        _set_busy(False)
 
     settings_view = ft.Container(padding=25, content=ft.Column([
         ft.Text("Settings", size=28, weight=ft.FontWeight.BOLD),
@@ -1732,11 +1890,21 @@ def main(page: ft.Page):
                 color=ft.Colors.GREY_400),
     ], spacing=12, scroll=ft.ScrollMode.AUTO))
 
+    log_view = ft.Container(
+        padding=20,
+        expand=True,
+        content=ft.Column([
+            ft.Text("Application Log", size=28, weight=ft.FontWeight.BOLD),
+            ft.Divider(),
+            app_log_text,
+        ], spacing=10, expand=True),
+    )
+
     # ═════════════════════════════════════════════════════════════════════════
-    #  Navigation  —  Home(0), Script(1), Send(2), Settings(3)
+    #  Navigation  —  Home(0), Targets(1), Script(2), Send(3), Log(4)
     # ═════════════════════════════════════════════════════════════════════════
     content_area = ft.Container(expand=True)
-    views = [settings_view, home_view, script_view, send_view]
+    views = [settings_view, home_view, script_view, send_view, log_view]
 
     def switch_view(idx):
         if idx == 0:
@@ -1750,6 +1918,8 @@ def main(page: ft.Page):
             gen_program_dd.visible = state["telescope"] == "LOT"
         elif idx == 3:
             _refresh_script_list()
+        elif idx == 4:
+            pass
         content_area.content = views[idx]
         page.update()
 
@@ -1763,6 +1933,7 @@ def main(page: ft.Page):
         ("Targets", ft.Icons.EXPLORE),
         ("Script", ft.Icons.CODE),
         ("Send", ft.Icons.SEND),
+        ("Log", ft.Icons.ARTICLE_OUTLINED),
     ]
 
     # ── Load logo for sidebar (from assets/ directory) ──
@@ -1785,6 +1956,7 @@ def main(page: ft.Page):
     )
 
     # ── Init ──
+    _append_app_log("Open", f"App opened v{APP_VERSION}")
     rebuild_cards()
     switch_view(0)
     # Start update scheduler (also fires an immediate startup check)
@@ -1798,5 +1970,4 @@ def main(page: ft.Page):
 
 
 if __name__ == "__main__":
-    # ft.run(main)
-    ft.app(target=main, assets_dir="assets")
+    ft.run(main, assets_dir="assets")
