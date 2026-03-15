@@ -4,6 +4,7 @@ import os
 import re
 import copy
 import time
+import webbrowser
 from datetime import datetime, timedelta
 from pathlib import Path
 import threading
@@ -37,8 +38,8 @@ DEFAULT_LOT_PROGRAMS = ["R01"]
 APP_TITLE = "Kinder Trigger"
 APP_VERSION = "1.0.2"
 GITHUB_REPO = "AlexLee24/Kinder_Trigger"
-# KINDER_WEB_BASE_URL = "https://kinder.astro.ncu.edu.tw" 
-KINDER_WEB_BASE_URL = "http://127.0.0.1:8000" 
+KINDER_WEB_BASE_URL = "https://kinder.astro.ncu.edu.tw" 
+# KINDER_WEB_BASE_URL = "http://127.0.0.1:8000" 
 SCRIPT_FILE = "script.txt"
 # Use ~/.kinder_trigger/ for config so packaged app finds it reliably
 _CONFIG_DIR = os.path.join(str(Path.home()), ".kinder_trigger")
@@ -244,26 +245,61 @@ def _next_check_time(freq: str) -> float:
     return nxt.timestamp()
 
 
-def _fetch_latest_release():
-    """Query GitHub releases API and return (tag_name, html_url) or raise."""
+def _parse_semver(v):
+    """Parse version like '1.0.3' to (1, 0, 3). Missing parts are padded with 0."""
+    raw_parts = str(v).strip().split(".")
+    nums = []
+    for p in raw_parts[:3]:
+        digits = "".join(ch for ch in p if ch.isdigit())
+        nums.append(int(digits) if digits else 0)
+    while len(nums) < 3:
+        nums.append(0)
+    return tuple(nums[:3])
+
+
+def _fmt_semver(vt):
+    """Format (major, minor, patch) to semantic version string."""
+    return f"{vt[0]}.{vt[1]}.{vt[2]}"
+
+
+def _candidate_next_versions(current_version):
+    """Return fast candidate versions that also cover cross-major jumps."""
+    major, minor, patch = _parse_semver(current_version)
+    cands = [
+        (major + 1, 0, 0),   # e.g. 1.0.3 -> 2.0.0
+        (major, minor + 1, 0),
+        (major, minor, patch + 1),
+    ]
+    out = []
+    for c in cands:
+        s = _fmt_semver(c)
+        if s not in out:
+            out.append(s)
+    return out
+
+
+def _fetch_next_release_candidate(current_version):
+    """Check candidate tag URLs quickly; return first existing candidate release."""
     import urllib.request as _req
-    import json as _json
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-    req = _req.Request(url, headers={"User-Agent": f"KinderTrigger/{APP_VERSION}",
-                                     "Accept": "application/vnd.github+json"})
-    with _req.urlopen(req, timeout=8) as resp:
-        data = _json.loads(resp.read().decode())
-    tag = data.get("tag_name", "").lstrip("v")
-    url = data.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
-    return tag, url
+    import urllib.error as _err
 
-
-def _version_tuple(v):
-    """Convert '1.2.3' to (1, 2, 3) for comparison."""
-    try:
-        return tuple(int(x) for x in str(v).split("."))
-    except Exception:
-        return (0,)
+    for next_ver in _candidate_next_versions(current_version):
+        url = f"https://github.com/{GITHUB_REPO}/releases/tag/v{next_ver}"
+        req = _req.Request(
+            url,
+            method="HEAD",
+            headers={"User-Agent": f"KinderTrigger/{APP_VERSION}"},
+        )
+        try:
+            with _req.urlopen(req, timeout=2) as resp:
+                code = getattr(resp, "status", 200)
+                if 200 <= code < 400:
+                    return next_ver, url
+        except _err.HTTPError as ex:
+            if ex.code == 404:
+                continue
+            raise
+    return None, None
 
 
 def _fetch_web_targets(telescope, api_key):
@@ -468,6 +504,55 @@ def main(page: ft.Page):
     def _append_app_log(tag, msg):
         line = f"[{tag}] {msg}"
         app_log_text.value = (app_log_text.value + line + "\n")[-40000:]
+        page.update()
+
+    def _open_url(url, tag="Open URL"):
+        if not url:
+            return
+        try:
+            # Use Python webbrowser to avoid Flet-version specific URL launcher issues.
+            threading.Thread(target=lambda: webbrowser.open(url, new=2), daemon=True).start()
+            _append_app_log(tag, f"Opened: {url}")
+        except Exception as ex:
+            _append_app_log(tag, f"Open failed: {ex}")
+            snack(f"Open URL failed: {ex}", ft.Colors.RED)
+
+    update_gate = {"required": False, "version": "", "url": ""}
+    force_update_msg = ft.Text(
+        "A newer version is required. Please download and install before continuing.",
+        size=14,
+    )
+
+    def _open_force_update(e=None):
+        if update_gate["url"]:
+            _open_url(update_gate["url"], "Check Update")
+            _append_app_log("Check Update", "Forced update link opened")
+
+    force_update_dlg = ft.AlertDialog(
+        modal=True,
+        title=ft.Text("Update Required"),
+        content=ft.Container(width=560, content=force_update_msg),
+        actions=[
+            ft.Button(
+                "Download Update",
+                icon=ft.Icons.DOWNLOAD,
+                on_click=_open_force_update,
+                style=ft.ButtonStyle(bgcolor=ft.Colors.ORANGE_700, color=ft.Colors.WHITE),
+            ),
+        ],
+        actions_alignment=ft.MainAxisAlignment.END,
+    )
+    page.overlay.append(force_update_dlg)
+
+    def _enforce_update(version, release_url):
+        update_gate["required"] = True
+        update_gate["version"] = version
+        update_gate["url"] = release_url
+        force_update_msg.value = (
+            f"A newer version v{version} is required. "
+            f"Please download and install it before continuing to use this app."
+        )
+        force_update_dlg.open = True
         page.update()
 
     # ── Auto-load JSON by telescope ──
@@ -697,8 +782,8 @@ def main(page: ft.Page):
     def _goto_settings_from_editor():
         editor_dlg.open = False
         page.update()
-        nav_rail.selected_index = 0
-        switch_view(0)
+        nav_rail.selected_index = 1
+        switch_view(1)
 
     def _refresh_program_options():
         """Refresh all program dropdowns with current lot_programs list."""
@@ -987,28 +1072,36 @@ def main(page: ft.Page):
 
     # ── Home view ──
     web_status = ft.Text("", size=12, italic=True, color=ft.Colors.GREY_400)
-    update_status = ft.Text("", size=12, italic=True, color=ft.Colors.GREY_400)
+    update_spinner = ft.ProgressRing(width=18, height=18, stroke_width=2, visible=False)
+    update_status = ft.Text("", size=16, weight=ft.FontWeight.W_500, color=ft.Colors.GREY_400)
+    update_status_row = ft.Row(
+        [update_spinner, update_status],
+        spacing=8,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    )
 
     def _do_check_update(on_complete=None):
         """Check GitHub for a newer release in background."""
         _append_app_log("Check Update", "Checking for updates...")
         update_status.value = "Checking for updates..."
         update_status.color = ft.Colors.GREY_400
+        update_spinner.visible = True
         page.update()
 
         def _worker():
             try:
-                latest, release_url = _fetch_latest_release()
-                if _version_tuple(latest) > _version_tuple(APP_VERSION):
+                latest, release_url = _fetch_next_release_candidate(APP_VERSION)
+                if latest:
                     _append_app_log("Check Update", f"New version available: v{latest}")
                     update_status.value = f"New version v{latest} available! "
                     update_status.color = ft.Colors.ORANGE_400
+                    _enforce_update(latest, release_url)
                     # Attach clickable link via snackbar
                     page.snack_bar = ft.SnackBar(
                         content=ft.Row([
                             ft.Text(f"Update v{latest} available — "),
                             ft.TextButton("Open Release",
-                                          on_click=lambda e: page.launch_url(release_url)),
+                                          on_click=lambda e: _open_url(release_url, "Check Update")),
                         ]),
                         bgcolor=ft.Colors.ORANGE_900,
                         duration=8000,
@@ -1022,6 +1115,8 @@ def main(page: ft.Page):
                 _append_app_log("Check Update", f"Failed: {ex}")
                 update_status.value = f"Update check failed: {ex}"
                 update_status.color = ft.Colors.GREY_600
+            finally:
+                update_spinner.visible = False
             if on_complete:
                 on_complete()
             page.update()
@@ -1355,7 +1450,7 @@ def main(page: ft.Page):
         ft.Row([
             ft.Button("Generate Script", icon=ft.Icons.PLAY_ARROW, on_click=_on_generate,
                       style=ft.ButtonStyle(bgcolor=ft.Colors.BLUE_700, color=ft.Colors.WHITE)),
-            ft.Button("Copy to Clipboard", icon=ft.Icons.COPY, on_click=_on_copy_script),
+            # ft.Button("Copy to Clipboard", icon=ft.Icons.COPY, on_click=_on_copy_script),
         ], spacing=12),
         gen_status,
         ft.Row([
@@ -1667,7 +1762,7 @@ def main(page: ft.Page):
                 ft.Text("Please double check target list before sending."),
                 confirm_targets_title,
                 ft.Container(
-                    border=ft.border.all(1, ft.Colors.GREY_700),
+                    border=ft.Border.all(1, ft.Colors.GREY_700),
                     border_radius=8,
                     padding=10,
                     content=confirm_targets_list,
@@ -1733,6 +1828,10 @@ def main(page: ft.Page):
         value=os.getenv("UPDATE_CHECK_FREQ", "startup"),
     )
     set_status = ft.Text("")
+    _suspend_auto_env_save = {"v": False}
+    _last_saved_update_freq = {"v": os.getenv("UPDATE_CHECK_FREQ", "startup")}
+    _UPDATE_FREQ_TEXT = {k: v for k, v in _UPDATE_FREQ_OPTIONS}
+    home_update_freq_text = ft.Text("", size=14, color=ft.Colors.GREY_300)
 
     # ── LOT Programs management ──
     prog_input = ft.TextField(label="New Program (e.g. R07)", width=200)
@@ -1783,18 +1882,45 @@ def main(page: ft.Page):
 
     _build_prog_chips()
 
-    def _on_save_settings(e):
-        _set_busy(True, "Saving settings...", e.control)
+    def _save_settings_to_env(show_feedback=False):
         token = set_token.value.strip()
         channel = set_channel.value.strip()
         kinder_web_api = set_kinder_web_api.value.strip()
         freq = set_update_freq.value or "startup"
-        try:
-            _save_env(token, channel, kinder_web_api)
-            _save_env_vars({"UPDATE_CHECK_FREQ": freq})
+
+        _save_env(token, channel, kinder_web_api)
+        _save_env_vars({"UPDATE_CHECK_FREQ": freq})
+
+        if freq != _last_saved_update_freq["v"]:
+            _last_saved_update_freq["v"] = freq
+            _start_update_scheduler()
+
+        home_update_freq_text.value = f"Auto-check schedule: {_UPDATE_FREQ_TEXT.get(freq, freq)}"
+
+        if show_feedback:
             set_status.value = f"Saved to {ENV_FILE}"
             snack("Settings saved to .env")
-            _start_update_scheduler()  # restart with new frequency
+
+    def _on_env_field_changed(e):
+        if _suspend_auto_env_save["v"]:
+            return
+        try:
+            _save_settings_to_env(show_feedback=False)
+            set_status.value = f"Auto-saved to {ENV_FILE}"
+            page.update()
+        except Exception as ex:
+            set_status.value = f"Error: {ex}"
+            page.update()
+
+    set_token.on_change = _on_env_field_changed
+    set_channel.on_change = _on_env_field_changed
+    set_kinder_web_api.on_change = _on_env_field_changed
+    set_update_freq.on_change = _on_env_field_changed
+
+    def _on_save_settings(e):
+        _set_busy(True, "Saving settings...", e.control)
+        try:
+            _save_settings_to_env(show_feedback=True)
         except Exception as ex:
             set_status.value = f"Error: {ex}"
             snack(f"Save error: {ex}", ft.Colors.RED)
@@ -1826,15 +1952,84 @@ def main(page: ft.Page):
 
     def _on_reload_settings(e):
         _set_busy(True, "Reloading settings...", e.control)
-        _ensure_env_file()
-        set_token.value = os.getenv("SLACK_BOT_TOKEN", "")
-        set_channel.value = os.getenv("SLACK_CHANNEL_ID_CONTROL_ROOM", "")
-        set_kinder_web_api.value = os.getenv("KINDER_WEB_API", "")
-        set_update_freq.value = os.getenv("UPDATE_CHECK_FREQ", "startup")
-        set_status.value = "Reloaded from .env"
-        page.update()
-        snack("Settings reloaded from .env")
-        _set_busy(False)
+        _suspend_auto_env_save["v"] = True
+        try:
+            _ensure_env_file()
+            set_token.value = os.getenv("SLACK_BOT_TOKEN", "")
+            set_channel.value = os.getenv("SLACK_CHANNEL_ID_CONTROL_ROOM", "")
+            set_kinder_web_api.value = os.getenv("KINDER_WEB_API", "")
+            set_update_freq.value = os.getenv("UPDATE_CHECK_FREQ", "startup")
+            _last_saved_update_freq["v"] = set_update_freq.value or "startup"
+            home_update_freq_text.value = (
+                f"Auto-check schedule: {_UPDATE_FREQ_TEXT.get(set_update_freq.value or 'startup', set_update_freq.value or 'startup')}"
+            )
+            set_status.value = "Reloaded from .env"
+            page.update()
+            snack("Settings reloaded from .env")
+        finally:
+            _suspend_auto_env_save["v"] = False
+            _set_busy(False)
+
+    home_update_freq_text.value = (
+        f"Auto-check schedule: {_UPDATE_FREQ_TEXT.get(set_update_freq.value or 'startup', set_update_freq.value or 'startup')}"
+    )
+
+    dashboard_view = ft.Container(
+        padding=25,
+        content=ft.Column([
+            ft.Text("Home", size=30, weight=ft.FontWeight.BOLD),
+            ft.Text("Update & About", size=14, color=ft.Colors.GREY_400),
+            ft.Divider(),
+            ft.Row([
+                ft.Text(f"Kinder Trigger  v{APP_VERSION}", size=16, weight=ft.FontWeight.W_600),
+                ft.Button("Check for Updates", icon=ft.Icons.SYSTEM_UPDATE_ALT,
+                          on_click=lambda e: _do_check_update()),
+            ], spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            update_status_row,
+            home_update_freq_text,
+            ft.Divider(),
+            ft.Text("Workflow", size=18, weight=ft.FontWeight.W_500),
+            ft.Row([
+                ft.Container(
+                    bgcolor=ft.Colors.BLUE_GREY_800,
+                    border_radius=10,
+                    padding=ft.Padding.symmetric(horizontal=10, vertical=6),
+                    content=ft.Text("1. Check Setting", size=13, color=ft.Colors.WHITE),
+                ),
+                ft.Icon(ft.Icons.ARROW_FORWARD, size=16, color=ft.Colors.GREY_400),
+                ft.Container(
+                    bgcolor=ft.Colors.BLUE_GREY_800,
+                    border_radius=10,
+                    padding=ft.Padding.symmetric(horizontal=10, vertical=6),
+                    content=ft.Text("2. Sync/Add Target", size=13, color=ft.Colors.WHITE),
+                ),
+                ft.Icon(ft.Icons.ARROW_FORWARD, size=16, color=ft.Colors.GREY_400),
+                ft.Container(
+                    bgcolor=ft.Colors.BLUE_GREY_800,
+                    border_radius=10,
+                    padding=ft.Padding.symmetric(horizontal=10, vertical=6),
+                    content=ft.Text("3. Genarate Script", size=13, color=ft.Colors.WHITE),
+                ),
+                ft.Icon(ft.Icons.ARROW_FORWARD, size=16, color=ft.Colors.GREY_400),
+                ft.Container(
+                    bgcolor=ft.Colors.BLUE_GREY_800,
+                    border_radius=10,
+                    padding=ft.Padding.symmetric(horizontal=10, vertical=6),
+                    content=ft.Text("4. Send", size=13, color=ft.Colors.WHITE),
+                ),
+            ], wrap=True, spacing=8, run_spacing=8),
+            ft.Divider(),
+            ft.Text("About", size=18, weight=ft.FontWeight.W_500),
+            ft.Text("Cross-platform Observation Trigger", size=13, color=ft.Colors.GREY_400),
+            ft.Text("Platforms: MacOS, Windows", size=13,
+                    color=ft.Colors.GREY_400),
+            ft.Text("Telescopes: LOT / SLT", size=13, color=ft.Colors.GREY_400),
+            ft.Text(f"Plotting: {'Available' if HAS_PLOTTING else 'Not available'}", size=13,
+                    color=ft.Colors.GREY_400),
+            ft.Text(f"Slack SDK: {'Available' if HAS_SLACK else 'Not available (pip install slack-sdk)'}", size=13,
+                    color=ft.Colors.GREY_400),
+        ], spacing=12, scroll=ft.ScrollMode.AUTO),
+    )
 
     settings_view = ft.Container(padding=25, content=ft.Column([
         ft.Text("Settings", size=28, weight=ft.FontWeight.BOLD),
@@ -1856,38 +2051,18 @@ def main(page: ft.Page):
             ft.Button("Add", icon=ft.Icons.ADD, on_click=_add_program),
         ], spacing=10),
         ft.Divider(),
-        ft.Text("Slack Configuration", size=18, weight=ft.FontWeight.W_500),
-        ft.Text(f"Credentials are stored in {ENV_FILE}", size=13,
+        ft.Text("Slack & API Configuration", size=18, weight=ft.FontWeight.W_500),
+        ft.Text(f"These values are stored in {ENV_FILE}. Changes are auto-saved.", size=13,
                 color=ft.Colors.GREY_400, italic=True),
         set_token,
         set_channel,
-        ft.Divider(),
-        ft.Text("Kinder Web API", size=18, weight=ft.FontWeight.W_500),
-        ft.Text("API key for Kinder web service", size=13,
-                color=ft.Colors.GREY_400, italic=True),
         set_kinder_web_api,
+        set_update_freq,
         ft.Row([
             ft.Button("Save to .env", icon=ft.Icons.SAVE, on_click=_on_save_settings),
             ft.Button("Reload .env", icon=ft.Icons.REFRESH, on_click=_on_reload_settings),
         ], spacing=12),
         set_status,
-        ft.Divider(),
-        ft.Text("About", size=18, weight=ft.FontWeight.W_500),
-        ft.Row([
-            ft.Text(f"Kinder Trigger  v{APP_VERSION}", size=14, weight=ft.FontWeight.W_500),
-            ft.Button("Check for Updates", icon=ft.Icons.SYSTEM_UPDATE_ALT,
-                      on_click=lambda e: _do_check_update()),
-            update_status,
-        ], spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-        set_update_freq,
-        ft.Text("Cross-platform Observation Trigger", size=13, color=ft.Colors.GREY_400),
-        ft.Text("Platforms: Windows, macOS, Linux, iOS, Android, Web", size=13,
-                color=ft.Colors.GREY_400),
-        ft.Text("Telescopes: LOT / SLT", size=13, color=ft.Colors.GREY_400),
-        ft.Text(f"Plotting: {'Available' if HAS_PLOTTING else 'Not available'}", size=13,
-                color=ft.Colors.GREY_400),
-        ft.Text(f"Slack SDK: {'Available' if HAS_SLACK else 'Not available (pip install slack-sdk)'}", size=13,
-                color=ft.Colors.GREY_400),
     ], spacing=12, scroll=ft.ScrollMode.AUTO))
 
     log_view = ft.Container(
@@ -1901,35 +2076,45 @@ def main(page: ft.Page):
     )
 
     # ═════════════════════════════════════════════════════════════════════════
-    #  Navigation  —  Home(0), Targets(1), Script(2), Send(3), Log(4)
+    #  Navigation  —  Home(0), Settings(1), Targets(2), Script(3), Send(4), Log(5)
     # ═════════════════════════════════════════════════════════════════════════
     content_area = ft.Container(expand=True)
-    views = [settings_view, home_view, script_view, send_view, log_view]
+    views = [dashboard_view, settings_view, home_view, script_view, send_view, log_view]
 
     def switch_view(idx):
         if idx == 0:
-            set_data_path_label.value = _get_data_path()
+            home_update_freq_text.value = (
+                f"Auto-check schedule: {_UPDATE_FREQ_TEXT.get(set_update_freq.value or 'startup', set_update_freq.value or 'startup')}"
+            )
         elif idx == 1:
+            set_data_path_label.value = _get_data_path()
+        elif idx == 2:
             home_telescope_dd.value = state["telescope"]
             data_path_label.value = _get_data_path()
             auto_save_label.value = f"Auto-saved to {os.path.basename(_json_path(state['telescope']))}"
-        elif idx == 2:
+        elif idx == 3:
             gen_telescope_dd.value = state["telescope"]
             gen_program_dd.visible = state["telescope"] == "LOT"
-        elif idx == 3:
-            _refresh_script_list()
         elif idx == 4:
+            _refresh_script_list()
+        elif idx == 5:
             pass
         content_area.content = views[idx]
         page.update()
 
     def on_nav(e):
+        if update_gate["required"]:
+            force_update_dlg.open = True
+            snack("Update required. Please download the latest version.", ft.Colors.ORANGE)
+            page.update()
+            return
         switch_view(e.control.selected_index)
 
     is_mobile = page.platform in (ft.PagePlatform.ANDROID, ft.PagePlatform.IOS)
 
     nav_dests = [
-        ("Home", ft.Icons.SETTINGS),
+        ("Home", ft.Icons.HOME_OUTLINED),
+        ("Settings", ft.Icons.SETTINGS),
         ("Targets", ft.Icons.EXPLORE),
         ("Script", ft.Icons.CODE),
         ("Send", ft.Icons.SEND),
