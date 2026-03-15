@@ -1657,7 +1657,11 @@ def main(page: ft.Page):
                                 "target_name": t.get("name", ""),
                                 "telescope": tel,
                                 "obs_date": obs_date,
-                                "priority": t.get("priority", "Normal"),
+                                "priority": (
+                                    f"{t.get('priority', 'Normal')} - {t.get('program', '').strip()}"
+                                    if tel == "LOT" and t.get("program", "").strip()
+                                    else t.get("priority", "Normal")
+                                ),
                                 "is_triggered": True,
                                 "trigger_filter": formatted_filters if formatted_filters else "",
                                 "trigger_exp": None,
