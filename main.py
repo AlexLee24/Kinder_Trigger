@@ -36,7 +36,7 @@ PRIORITIES = ["Normal", "High", "Urgent"]
 TELESCOPES = ["SLT", "LOT"]
 DEFAULT_LOT_PROGRAMS = ["R01"]
 APP_TITLE = "Kinder Trigger"
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.1"
 GITHUB_REPO = "AlexLee24/Kinder_Trigger"
 KINDER_WEB_BASE_URL = "https://kinder.astro.ncu.edu.tw" 
 # KINDER_WEB_BASE_URL = "http://127.0.0.1:8000" 
@@ -554,6 +554,10 @@ def main(page: ft.Page):
         )
         force_update_dlg.open = True
         page.update()
+        try:
+            force_update_dlg.update()
+        except Exception:
+            pass
 
     # ── Auto-load JSON by telescope ──
     _ensure_json_files()
@@ -1086,10 +1090,16 @@ def main(page: ft.Page):
         update_status.value = "Checking for updates..."
         update_status.color = ft.Colors.GREY_400
         update_spinner.visible = True
+        try:
+            update_status.update()
+            update_spinner.update()
+        except Exception:
+            pass
         page.update()
-
+        
         def _worker():
             try:
+                time.sleep(0.5)  # 稍微延遲讓初始畫面完成渲染，避免Mac環境掉進閒置休眠
                 latest, release_url = _fetch_next_release_candidate(APP_VERSION)
                 if latest:
                     _append_app_log("Check Update", f"New version available: v{latest}")
@@ -1107,6 +1117,7 @@ def main(page: ft.Page):
                         duration=8000,
                     )
                     page.snack_bar.open = True
+                    page.update()
                 else:
                     _append_app_log("Check Update", f"Up to date: v{APP_VERSION}")
                     update_status.value = f"v{APP_VERSION} — up to date"
@@ -1116,7 +1127,21 @@ def main(page: ft.Page):
                 update_status.value = f"Update check failed: {ex}"
                 update_status.color = ft.Colors.GREY_600
             finally:
+                page.update()
+                
+                try:
+                    update_status.update()
+                except Exception:
+                    pass
+                
+                time.sleep(0.5)  # 利用動畫仍在進行時再稍微等待，強制 Flutter 引擎將最新文字給畫出來
+                
                 update_spinner.visible = False
+                try:
+                    update_spinner.update()
+                except Exception:
+                    pass
+                    
             if on_complete:
                 on_complete()
             page.update()
