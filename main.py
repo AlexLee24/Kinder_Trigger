@@ -36,7 +36,7 @@ PRIORITIES = ["Normal", "High", "Urgent"]
 TELESCOPES = ["SLT", "LOT"]
 DEFAULT_LOT_PROGRAMS = ["R01"]
 APP_TITLE = "Kinder Trigger"
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.3"
 GITHUB_REPO = "AlexLee24/Kinder_Trigger"
 KINDER_WEB_BASE_URL = "https://kinder.astro.ncu.edu.tw" 
 # KINDER_WEB_BASE_URL = "http://127.0.0.1:8000" 
@@ -416,7 +416,7 @@ def v2_to_v1_target(target):
 def main(page: ft.Page):
     page.title = APP_TITLE
     page.theme_mode = ft.ThemeMode.DARK
-    page.window.width = 1100
+    page.window.width = 1500
     page.window.height = 800
     page.window.icon = "Kinder_dark_jpg.jpg"
     
@@ -432,57 +432,70 @@ def main(page: ft.Page):
 
     state = {
         "telescope": "SLT",
-        "targets": [],
+        "all_targets": {"SLT": [], "LOT": []},
         "script": "",
         "img_path": "",
         "last_script_path": "",
     }
 
-    _button_busy_state = {}
-    _current_busy_control = {"v": None}
+    def _tgt(tel=None):
+        return state["all_targets"][tel or state["telescope"]]
 
-    def _set_button_busy(control, is_busy, text="Running..."):
-        if control is None or not hasattr(control, "disabled"):
-            return
+    _busy_stop = threading.Event()
+    _busy_stop.set()  # not busy initially
 
-        key = id(control)
+    busy_label = ft.Text("Processing...", size=16, color=ft.Colors.WHITE, weight=ft.FontWeight.BOLD)
+    busy_overlay = ft.Container(
+        visible=False,
+        expand=True,
+        bgcolor=ft.Colors.with_opacity(0.6, ft.Colors.BLACK),
+        alignment=ft.Alignment(0, 0),
+        on_click=lambda e: None,
+        content=ft.Column([
+            ft.Stack([
+                ft.Container(
+                    width=80, height=80,
+                    alignment=ft.Alignment(0, 0),
+                    content=ft.ProgressRing(
+                        width=80, height=80, stroke_width=5,
+                        color=ft.Colors.WHITE,
+                    ),
+                ),
+                ft.Container(
+                    width=80, height=80,
+                    alignment=ft.Alignment(0, 0),
+                    content=ft.Image(
+                        src="Kinder_light.png",
+                        width=44, height=44,
+                        fit=ft.BoxFit.CONTAIN,
+                    ),
+                ),
+            ], width=80, height=80),
+            busy_label,
+        ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=16),
+    )
+
+    def _set_busy(is_busy, text="Processing...", control=None):
         if is_busy:
-            if key in _button_busy_state:
-                return
-            _button_busy_state[key] = {
-                "text": getattr(control, "text", None),
-                "icon": getattr(control, "icon", None),
-                "content": getattr(control, "content", None),
-                "disabled": control.disabled,
-            }
-            if isinstance(control, ft.Button):
-                label = _button_busy_state[key]["text"] or text
-                control.text = None
-                control.icon = None
-                control.content = ft.Row([
-                    ft.ProgressRing(width=14, height=14, stroke_width=2),
-                    ft.Text(label, size=12),
-                ], spacing=6, alignment=ft.MainAxisAlignment.CENTER)
-            control.disabled = True
-            return
-
-        old = _button_busy_state.pop(key, None)
-        if old is None:
-            return
-        if isinstance(control, ft.Button):
-            control.content = old["content"]
-            control.text = old["text"]
-            control.icon = old["icon"]
-        control.disabled = old["disabled"]
-
-    def _set_busy(is_busy, text="Running...", control=None):
-        if is_busy:
-            _current_busy_control["v"] = control
-            _set_button_busy(control, True, text)
+            _busy_stop.clear()
+            busy_label.value = text
+            busy_overlay.visible = True
+            page.update()
+            def _refresh_loop():
+                while not _busy_stop.is_set():
+                    try:
+                        page.update()
+                    except Exception:
+                        pass
+                    time.sleep(0.15)
+            page.run_thread(_refresh_loop)
         else:
-            _set_button_busy(_current_busy_control["v"], False, text)
-            _current_busy_control["v"] = None
-        page.update()
+            # Flush pending UI changes while ProgressRing animation is still driving frames
+            page.update()
+            time.sleep(0.35)  # Let animation-driven frames pick up the rebuilt controls
+            _busy_stop.set()
+            busy_overlay.visible = False
+            page.update()
 
     def snack(msg, color=ft.Colors.GREEN):
         page.snack_bar = ft.SnackBar(ft.Text(msg), bgcolor=color)
@@ -511,7 +524,7 @@ def main(page: ft.Page):
             return
         try:
             # Use Python webbrowser to avoid Flet-version specific URL launcher issues.
-            threading.Thread(target=lambda: webbrowser.open(url, new=2), daemon=True).start()
+            page.run_thread(lambda: webbrowser.open(url, new=2))
             _append_app_log(tag, f"Opened: {url}")
         except Exception as ex:
             _append_app_log(tag, f"Open failed: {ex}")
@@ -563,24 +576,26 @@ def main(page: ft.Page):
     _ensure_json_files()
 
     def _load_main_set():
-        """Load targets from main_set_{telescope}.json."""
-        jp = _json_path(state["telescope"])
-        if not os.path.exists(jp):
-            data = _empty_main_set(state["telescope"])
-            with open(jp, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-        data = load_json_any_version(jp)
-        state["targets"] = data["targets"]
+        """Load targets from main_set_{telescope}.json for all telescopes."""
+        for tel in TELESCOPES:
+            jp = _json_path(tel)
+            if not os.path.exists(jp):
+                data = _empty_main_set(tel)
+                with open(jp, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
+            data = load_json_any_version(jp)
+            state["all_targets"][tel] = data["targets"]
 
-    def _save_main_set():
-        out = {
-            "version": 2,
-            "settings": {"telescope": state["telescope"]},
-            "targets": state["targets"],
-        }
-        jp = _json_path(state["telescope"])
-        with open(jp, "w", encoding="utf-8") as f:
-            json.dump(out, f, indent=2, ensure_ascii=False)
+    def _save_main_set(tel=None):
+        for t in ([tel] if tel else TELESCOPES):
+            out = {
+                "version": 2,
+                "settings": {"telescope": t},
+                "targets": state["all_targets"][t],
+            }
+            jp = _json_path(t)
+            with open(jp, "w", encoding="utf-8") as f:
+                json.dump(out, f, indent=2, ensure_ascii=False)
 
     _load_main_set()
 
@@ -617,31 +632,17 @@ def main(page: ft.Page):
     # ═════════════════════════════════════════════════════════════════════════
     #  PAGE 1 — HOME (Targets)
     # ═════════════════════════════════════════════════════════════════════════
-    target_cards = ft.Column(spacing=12, scroll=ft.ScrollMode.AUTO, expand=True)
+    target_cards_slt = ft.Column(spacing=12, scroll=ft.ScrollMode.AUTO, expand=True)
+    target_cards_lot = ft.Column(spacing=12, scroll=ft.ScrollMode.AUTO, expand=True)
 
-    # Telescope selector in home header
-    home_telescope_dd = ft.Dropdown(
-        label="Telescope", width=140, value=state["telescope"],
-        options=[ft.dropdown.Option(t) for t in TELESCOPES],
-        on_select=lambda e: _on_telescope_change(e),
-    )
 
-    def _on_telescope_change(e):
-        state["telescope"] = home_telescope_dd.value
-        _load_main_set()
+    def _toggle_enabled(idx, value, tel):
+        state["all_targets"][tel][idx]["enabled"] = value
+        _auto_save(tel)
         rebuild_cards()
-        auto_save_label.value = f"Auto-saved to {os.path.basename(_json_path(state['telescope']))}"
         page.update()
 
-
-
-    def _toggle_enabled(idx, value):
-        state["targets"][idx]["enabled"] = value
-        _auto_save()
-        rebuild_cards() 
-        page.update()
-
-    def build_target_card(idx, target):
+    def build_target_card(idx, target, tel):
         priority = target.get("priority", "Normal")
         mag_display = str(target.get("mag", "")) if target.get("mag") else "\u2014"
         is_enabled = target.get("enabled", True)
@@ -659,7 +660,7 @@ def main(page: ft.Page):
                             ft.Text(f"\u00d7{target['repeat']}", size=13)]
 
         program_ctrls = []
-        if state["telescope"] == "LOT" and target.get("program"):
+        if tel == "LOT" and target.get("program"):
             program_ctrls = [
                 ft.Container(bgcolor=ft.Colors.TEAL_700, border_radius=8,
                              padding=ft.Padding.symmetric(horizontal=8, vertical=3),
@@ -674,7 +675,7 @@ def main(page: ft.Page):
 
         return ft.Card(elevation=3, content=ft.Container(padding=16, opacity=opacity, content=ft.Column([
             ft.Row([
-                ft.Switch(value=is_enabled, on_change=lambda e: _toggle_enabled(idx, e.control.value)),
+                ft.Switch(value=is_enabled, on_change=lambda e, i=idx, t=tel: _toggle_enabled(i, e.control.value, t)),
                 ft.Text(f"#{idx+1}", size=14, color=ft.Colors.GREY_500, weight=ft.FontWeight.BOLD),
                 ft.Text(target["name"], size=18, weight=ft.FontWeight.BOLD, expand=True),
                 ft.Container(bgcolor=_priority_color(priority), border_radius=12,
@@ -683,17 +684,17 @@ def main(page: ft.Page):
                                              weight=ft.FontWeight.BOLD)),
                 ft.IconButton(ft.Icons.ARROW_UPWARD, icon_size=18, tooltip="Move Up",
                               icon_color=ft.Colors.GREY_400 if idx > 0 else ft.Colors.GREY_800,
-                              on_click=lambda e, i=idx: _move_up(i)),
+                              on_click=lambda e, i=idx, t=tel: _move_up(i, t)),
                 ft.IconButton(ft.Icons.ARROW_DOWNWARD, icon_size=18, tooltip="Move Down",
-                              icon_color=ft.Colors.GREY_400 if idx < len(state["targets"]) - 1 else ft.Colors.GREY_800,
-                              on_click=lambda e, i=idx: _move_down(i)),
+                              icon_color=ft.Colors.GREY_400 if idx < len(state["all_targets"][tel]) - 1 else ft.Colors.GREY_800,
+                              on_click=lambda e, i=idx, t=tel: _move_down(i, t)),
                 ft.IconButton(ft.Icons.EDIT, icon_size=20, tooltip="Edit",
-                              on_click=lambda e, i=idx: open_editor(i)),
+                              on_click=lambda e, i=idx, t=tel: open_editor(i, t)),
                 ft.IconButton(ft.Icons.CONTENT_COPY, icon_size=18, tooltip="Duplicate",
-                              on_click=lambda e, i=idx: _dup(i)),
+                              on_click=lambda e, i=idx, t=tel: _dup(i, t)),
                 ft.IconButton(ft.Icons.DELETE_OUTLINE, icon_size=20, tooltip="Delete",
                               icon_color=ft.Colors.RED_300,
-                              on_click=lambda e, i=idx: _del(i)),
+                              on_click=lambda e, i=idx, t=tel: _del(i, t)),
             ], alignment=ft.MainAxisAlignment.START, spacing=6),
             ft.Row([
                 ft.Icon(ft.Icons.LOCATION_ON, size=14, color=ft.Colors.GREY_500),
@@ -711,56 +712,64 @@ def main(page: ft.Page):
             *note_ctrls,
         ], spacing=6)))
 
-    def rebuild_cards():
-        target_cards.controls.clear()
-        if not state["targets"]:
-            target_cards.controls.append(ft.Container(
-                alignment=ft.Alignment(0, 0), padding=60,
+    def _rebuild_one(col, tel):
+        col.controls.clear()
+        targets = state["all_targets"][tel]
+        if not targets:
+            col.controls.append(ft.Container(
+                alignment=ft.Alignment(0, 0), padding=40,
                 content=ft.Column([
-                    ft.Icon(ft.Icons.ADD_CIRCLE_OUTLINE, size=64, color=ft.Colors.GREY_600),
-                    ft.Text("No targets yet", size=20, color=ft.Colors.GREY_500),
-                    ft.Text("Click + to add a target", size=14, color=ft.Colors.GREY_600),
-                ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=8),
+                    ft.Icon(ft.Icons.ADD_CIRCLE_OUTLINE, size=48, color=ft.Colors.GREY_700),
+                    ft.Text("No targets", size=16, color=ft.Colors.GREY_500),
+                ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=6),
             ))
             return
-        for i, t in enumerate(state["targets"]):
-            target_cards.controls.append(build_target_card(i, t))
+        for i, t in enumerate(targets):
+            col.controls.append(build_target_card(i, t, tel))
 
-    def _auto_save():
+    def rebuild_cards():
+        _rebuild_one(target_cards_slt, "SLT")
+        _rebuild_one(target_cards_lot, "LOT")
+
+    def _auto_save(tel=None):
         try:
-            _save_main_set()
+            _save_main_set(tel)
         except Exception:
             pass
 
-    def _move_up(idx):
+    def _move_up(idx, tel):
+        tgts = state["all_targets"][tel]
         if idx <= 0:
             return
-        state["targets"][idx], state["targets"][idx - 1] = state["targets"][idx - 1], state["targets"][idx]
-        _auto_save()
+        tgts[idx], tgts[idx - 1] = tgts[idx - 1], tgts[idx]
+        _auto_save(tel)
         rebuild_cards()
         page.update()
 
-    def _move_down(idx):
-        if idx >= len(state["targets"]) - 1:
+    def _move_down(idx, tel):
+        tgts = state["all_targets"][tel]
+        if idx >= len(tgts) - 1:
             return
-        state["targets"][idx], state["targets"][idx + 1] = state["targets"][idx + 1], state["targets"][idx]
-        _auto_save()
+        tgts[idx], tgts[idx + 1] = tgts[idx + 1], tgts[idx]
+        _auto_save(tel)
         rebuild_cards()
         page.update()
 
-    def _dup(idx):
-        t = copy.deepcopy(state["targets"][idx])
+    def _dup(idx, tel):
+        tgts = state["all_targets"][tel]
+        t = copy.deepcopy(tgts[idx])
         t["name"] += "_copy"
-        state["targets"].insert(idx + 1, t)
-        _auto_save()
+        tgts.insert(idx + 1, t)
+        _auto_save(tel)
         rebuild_cards()
         page.update()
-        snack(f"Duplicated: {state['targets'][idx]['name']}")
+        snack(f"Duplicated: {tgts[idx]['name']}")
 
-    def _del(idx):
-        name = state["targets"][idx]["name"]
-        state["targets"].pop(idx)
-        _auto_save()
+    def _del(idx, tel):
+        tgts = state["all_targets"][tel]
+        name = tgts[idx]["name"]
+        tgts.pop(idx)
+        _auto_save(tel)
         rebuild_cards()
         page.update()
         snack(f"Deleted: {name}")
@@ -806,7 +815,7 @@ def main(page: ft.Page):
 
     def _update_auto_availability():
         """Disable auto exposure for LOT or SLT with mag outside 12-22."""
-        tel = state["telescope"]
+        tel = edit_tel["v"]
         if tel == "LOT":
             ed_auto.value = False
             ed_auto.disabled = True
@@ -941,20 +950,22 @@ def main(page: ft.Page):
     ed_auto.on_change = _on_auto_toggle
 
     edit_idx = {"v": -1}
+    edit_tel = {"v": "SLT"}
 
-    def open_editor(idx):
+    def open_editor(idx, tel="SLT"):
+        edit_tel["v"] = tel
         if idx < 0:
             edit_idx["v"] = -1
             ed_name.value = ed_ra.value = ed_dec.value = ed_mag.value = ed_note.value = ""
             ed_priority.value = "Normal"
-            ed_program.value = lot_programs[0] if state["telescope"] == "LOT" and lot_programs else None
+            ed_program.value = lot_programs[0] if tel == "LOT" and lot_programs else None
             ed_auto.value = True
             ed_repeat.value = "0"
             obs_rows_data.clear()
             editor_dlg.title = ft.Text("New Target")
         else:
             edit_idx["v"] = idx
-            t = state["targets"][idx]
+            t = state["all_targets"][tel][idx]
             ed_name.value = t.get("name", "")
             ed_ra.value = t.get("ra", "")
             ed_dec.value = t.get("dec", "")
@@ -962,12 +973,12 @@ def main(page: ft.Page):
             ed_priority.value = t.get("priority", "Normal")
             ed_auto.value = t.get("auto_exposure", True)
             ed_repeat.value = str(t.get("repeat", 0))
-            ed_program.value = t.get("program", lot_programs[0] if lot_programs else "") if state["telescope"] == "LOT" else None
+            ed_program.value = t.get("program", lot_programs[0] if lot_programs else "") if tel == "LOT" else None
             ed_note.value = t.get("note", "")
             obs_rows_data.clear()
             obs_rows_data.extend(copy.deepcopy(t.get("observations", [])))
             editor_dlg.title = ft.Text(f"Edit: {t['name']}")
-        ed_program_container.visible = (state["telescope"] == "LOT")
+        ed_program_container.visible = (tel == "LOT")
         obs_container.visible = not ed_auto.value
         _refresh_obs()
         _update_auto_availability()
@@ -985,10 +996,10 @@ def main(page: ft.Page):
             snack("Urgent priority requires a note!", ft.Colors.ORANGE)
             return
         # Validate exposure rules
-        if state["telescope"] == "LOT" and ed_auto.value:
+        if edit_tel["v"] == "LOT" and ed_auto.value:
             snack("LOT requires manual exposure settings!", ft.Colors.ORANGE)
             return
-        if state["telescope"] == "SLT" and ed_auto.value:
+        if edit_tel["v"] == "SLT" and ed_auto.value:
             mag_str = ed_mag.value.strip()
             try:
                 mv = float(mag_str)
@@ -1004,16 +1015,18 @@ def main(page: ft.Page):
             "auto_exposure": ed_auto.value,
             "observations": copy.deepcopy(obs_rows_data) if not ed_auto.value else [],
             "repeat": int(ed_repeat.value) if ed_repeat.value.isdigit() else 0,
-            "program": ed_program.value if state["telescope"] == "LOT" else "",
+            "program": ed_program.value if edit_tel["v"] == "LOT" else "",
             "note": ed_note.value.strip(),
         }
+        tel = edit_tel["v"]
+        tgts = state["all_targets"][tel]
         idx = edit_idx["v"]
         if idx < 0:
-            state["targets"].append(t)
+            tgts.append(t)
         else:
-            state["targets"][idx] = t
+            tgts[idx] = t
         editor_dlg.open = False
-        _auto_save()
+        _auto_save(tel)
         rebuild_cards()
         page.update()
         snack(f"{'Added' if idx < 0 else 'Updated'}: {name}")
@@ -1063,14 +1076,14 @@ def main(page: ft.Page):
             _ensure_json_files()
             _load_main_set()
             rebuild_cards()
-            auto_save_label.value = f"Auto-saved to {os.path.basename(_json_path(state['telescope']))}"
+            auto_save_label.value = "Auto-saved (SLT & LOT)"
             page.update()
             snack(f"Data path set to {result}")
         finally:
             _set_busy(False)
 
     auto_save_label = ft.Text(
-        f"Auto-saved to {os.path.basename(_json_path(state['telescope']))}",
+        "Auto-saved (SLT & LOT)",
         size=12, color=ft.Colors.GREY_500, italic=True,
     )
 
@@ -1146,7 +1159,7 @@ def main(page: ft.Page):
                 on_complete()
             page.update()
 
-        threading.Thread(target=_worker, daemon=True).start()
+        page.run_thread(_worker)
 
     # ── Periodic update scheduler ──
     _scheduler_stop = threading.Event()
@@ -1172,59 +1185,64 @@ def main(page: ft.Page):
                     if not _scheduler_stop.is_set():
                         _do_check_update()
 
-        threading.Thread(target=_loop, daemon=True).start()
+        page.run_thread(_loop)
 
     def _do_web_fetch(trigger_control=None):
-        """Fetches from API, updates existing, adds new, conditionally disables targets not from API."""
+        """Fetches both SLT and LOT from API, updates existing, adds new, disables removed."""
         api_key = os.getenv("KINDER_WEB_API", "").strip()
         if not api_key:
             snack("Kinder Web API key not set. Go to Home (Settings).", ft.Colors.ORANGE)
             return
-        _set_busy(True, "Syncing targets from API...", trigger_control)
-        _append_app_log("Sync", f"Start sync for {state['telescope']}")
-        telescope = state["telescope"]
+        _set_busy(True, "Syncing targets from API...")
+        _append_app_log("Sync", "Start sync for SLT & LOT")
         web_status.value = "Fetching from web..."
         web_status.color = ft.Colors.YELLOW_400
         page.update()
 
         def _worker():
-            try:
-                new_targets = _fetch_web_targets(telescope, api_key)
-                
-                # Mirror API: update/add from API, disable targets not in API
-                api_map = {t["name"]: t for t in new_targets}
-                local_map = {t["name"]: i for i, t in enumerate(state["targets"])}
-                added, updated, disabled = 0, 0, 0
-                for name, api_t in api_map.items():
-                    if name in local_map:
-                        state["targets"][local_map[name]] = api_t
-                        updated += 1
-                    else:
-                        state["targets"].append(api_t)
-                        added += 1
-                for t in state["targets"]:
-                    if t["name"] not in api_map:
-                        if t.get("enabled", True):
-                            t["enabled"] = False
-                            disabled += 1
-                msg = f"Synced: +{added} new, {updated} updated, {disabled} disabled."
-                
-                _auto_save()
-                rebuild_cards()
+            total_added, total_updated, total_disabled = 0, 0, 0
+            errors = []
+            for telescope in TELESCOPES:
+                try:
+                    new_targets = _fetch_web_targets(telescope, api_key)
+                    api_map = {t["name"]: t for t in new_targets}
+                    targets = state["all_targets"][telescope]
+                    local_map = {t["name"]: i for i, t in enumerate(targets)}
+                    added, updated, disabled = 0, 0, 0
+                    for name, api_t in api_map.items():
+                        if name in local_map:
+                            targets[local_map[name]] = api_t
+                            updated += 1
+                        else:
+                            targets.append(api_t)
+                            added += 1
+                    for t in targets:
+                        if t["name"] not in api_map:
+                            if t.get("enabled", True):
+                                t["enabled"] = False
+                                disabled += 1
+                    _save_main_set(telescope)
+                    total_added += added
+                    total_updated += updated
+                    total_disabled += disabled
+                except Exception as ex:
+                    errors.append(f"{telescope}: {ex}")
+            rebuild_cards()
+            if errors:
+                msg = f"Partial error: {'; '.join(errors)}"
+                web_status.value = msg
+                web_status.color = ft.Colors.RED_300
+                _append_app_log("Sync", msg)
+                snack(msg, ft.Colors.RED)
+            else:
+                msg = f"Synced SLT+LOT: +{total_added} new, {total_updated} updated, {total_disabled} disabled."
                 web_status.value = msg
                 web_status.color = ft.Colors.GREEN_400
                 _append_app_log("Sync", msg)
                 snack(msg)
-            except Exception as ex:
-                web_status.value = f"Web error: {ex}"
-                web_status.color = ft.Colors.RED_300
-                _append_app_log("Sync", f"Error: {ex}")
-                snack(f"Web fetch error: {ex}", ft.Colors.RED)
-            finally:
-                _set_busy(False)
-            page.update()
+            _set_busy(False)
 
-        threading.Thread(target=_worker, daemon=True).start()
+        page.run_thread(_worker)
 
     def _on_sync_from_web(e):
         _do_web_fetch(e.control)
@@ -1242,31 +1260,53 @@ def main(page: ft.Page):
                       on_click=_on_sync_from_web,
                       style=ft.ButtonStyle(bgcolor=ft.Colors.BLUE_900, color=ft.Colors.WHITE)),
             ft.VerticalDivider(width=20),
-            ft.Button("Add Target", on_click=lambda e: open_editor(-1)),
+            ft.Button("Add SLT", icon=ft.Icons.ADD, on_click=lambda e: open_editor(-1, "SLT")),
+            ft.Button("Add LOT", icon=ft.Icons.ADD, on_click=lambda e: open_editor(-1, "LOT")),
             ft.Container(expand=True),
             web_status,
-            home_telescope_dd,
         ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
         ft.Row([
             ft.Container(expand=True),
             auto_save_label,
         ], spacing=10),
         ft.Divider(),
-        target_cards,
+        ft.Row([
+            ft.Column([
+                ft.Row([
+                    ft.Icon(ft.Icons.RADIO_BUTTON_CHECKED, size=14, color=ft.Colors.BLUE_300),
+                    ft.Text("SLT", size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.BLUE_300),
+                ], spacing=6),
+                ft.Divider(height=1),
+                target_cards_slt,
+            ], expand=True, spacing=6),
+            ft.VerticalDivider(width=1),
+            ft.Column([
+                ft.Row([
+                    ft.Icon(ft.Icons.RADIO_BUTTON_CHECKED, size=14, color=ft.Colors.GREEN_300),
+                    ft.Text("LOT", size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.GREEN_300),
+                ], spacing=6),
+                ft.Divider(height=1),
+                target_cards_lot,
+            ], expand=True, spacing=6),
+        ], expand=True, spacing=0, vertical_alignment=ft.CrossAxisAlignment.START),
     ], expand=True))
 
     # ═════════════════════════════════════════════════════════════════════════
     #  PAGE 2 — Script Generator
     # ═════════════════════════════════════════════════════════════════════════
-    script_output = ft.TextField(
-        label="Generated Script (script.txt)", multiline=True,
-        min_lines=18, max_lines=40, read_only=True,
+    _PIXEL_URI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+
+    script_output_slt = ft.TextField(
+        label="script_SLT.txt", multiline=True,
+        min_lines=14, max_lines=30, read_only=True,
         text_size=11, text_style=ft.TextStyle(font_family="Courier New"),
         expand=True,
     )
-    # 1x1 transparent pixel as valid placeholder
-    _PIXEL_URI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
-    obs_image = ft.Image(src=_PIXEL_URI, width=520, fit=ft.BoxFit.CONTAIN, visible=False)
+    obs_image_slt = ft.Image(src=_PIXEL_URI, width=400, fit=ft.BoxFit.CONTAIN, visible=False)
+
+    # LOT: dynamic per-program widgets, rebuilt when programs change
+    lot_script_col = ft.Column(spacing=12, scroll=ft.ScrollMode.AUTO, expand=True)
+    obs_image_lot = ft.Image(src=_PIXEL_URI, width=400, fit=ft.BoxFit.CONTAIN, visible=False)
     gen_status = ft.Text("")
 
     sort_mode = ft.RadioGroup(
@@ -1274,25 +1314,16 @@ def main(page: ft.Page):
         content=ft.Row([
             ft.Radio(value="home", label="Home order"),
             ft.Radio(value="rise", label="Rise time order"),
+            ft.Radio(value="priority", label="Priority order"),
         ], spacing=16),
     )
 
-    # Telescope & program selectors for script generation
-    gen_telescope_dd = ft.Dropdown(
-        label="Telescope", width=140, value=state["telescope"],
-        options=[ft.dropdown.Option(t) for t in TELESCOPES],
-        on_select=lambda e: _on_gen_telescope_change(e),
-    )
-    gen_program_dd = ft.Dropdown(
-        label="Program", width=120,
-        options=[ft.dropdown.Option(p) for p in lot_programs],
-        value=lot_programs[0] if lot_programs else None,
-        visible=state["telescope"] == "LOT",
-    )
+    # Telescope & program selectors are no longer needed in script view
+    gen_telescope_dd = ft.Dropdown(visible=False, value="SLT", options=[ft.dropdown.Option(t) for t in TELESCOPES])
+    gen_program_dd   = ft.Dropdown(visible=False, options=[ft.dropdown.Option(p) for p in lot_programs], value=lot_programs[0] if lot_programs else None)
 
     def _on_gen_telescope_change(e):
-        gen_program_dd.visible = gen_telescope_dd.value == "LOT"
-        page.update()
+        pass
 
     def _script_filename(telescope, program=""):
         """Return script filename like script_SLT.txt or script_LOT_R01.txt."""
@@ -1328,130 +1359,169 @@ def main(page: ft.Page):
         except Exception:
             return targets
 
-    def _on_generate(e):
-        _set_busy(True, "Generating script...", e.control)
-        telescope = gen_telescope_dd.value or state["telescope"]
+    _PRIORITY_ORDER = ["Urgent", "High", "Normal", "None"]
+
+    def _sort_targets_by_priority(targets):
+        """Sort targets by priority (Urgent first), then by original index."""
+        def _pri_key(item):
+            idx, t = item
+            p = t.get("priority", "Normal")
+            try:
+                return (_PRIORITY_ORDER.index(p), idx)
+            except ValueError:
+                return (len(_PRIORITY_ORDER), idx)
+        return [t for _, t in sorted(enumerate(targets), key=_pri_key)]
+
+    def _sort_targets(targets):
+        mode = sort_mode.value
+        if mode == "rise":
+            return _sort_targets_by_rise_time(targets)
+        if mode == "priority":
+            return _sort_targets_by_priority(targets)
+        return targets  # home order
+
+    def _generate_one(telescope, sorted_targets, current_day):
+        """Generate script(s) for one telescope. Returns (scripts_dict, plot_img_path_or_None).
+        scripts_dict: {filename: content} — SLT has 1 entry, LOT has 1 per program."""
         IS_LOT = "True" if telescope == "LOT" else "False"
-        program = gen_program_dd.value if telescope == "LOT" else ""
-        _append_app_log("Generate", f"Start generate for telescope={telescope}, program={program or 'normal'}")
-        
-        # Load targets for the selected telescope
-        if telescope != state["telescope"]:
-             # If generating for a different telescope than currently loaded in Home, load from file
-            jp = _json_path(telescope)
-            if os.path.exists(jp):
-                try:
-                    data = load_json_any_version(jp)
-                    targets_to_use = data.get("targets", [])
-                except Exception:
-                    targets_to_use = []
-            else:
-                targets_to_use = []
-        else:
-            targets_to_use = state["targets"]
-
-        if not targets_to_use:
-            snack(f"No targets found for {telescope}!", ft.Colors.ORANGE)
-            _append_app_log("Generate", f"No targets found for {telescope}")
-            _set_busy(False)
-            return
-
-        # Filter enabled targets
-        enabled_targets = [t for t in targets_to_use if t.get("enabled", True)]
-        if not enabled_targets:
-            snack(f"No enabled targets for {telescope}! Check Home tab switches.", ft.Colors.ORANGE)
-            _append_app_log("Generate", f"No enabled targets for {telescope}")
-            _set_busy(False)
-            return
-
-        # For LOT, filter targets by selected program
-        if telescope == "LOT" and program:
-            working_targets = [t for t in enabled_targets if t.get("program") == program]
-            if not working_targets:
-                snack(f"No enabled targets for program {program}!", ft.Colors.ORANGE)
-                _append_app_log("Generate", f"No enabled targets for program {program}")
-                _set_busy(False)
-                return
-        else:
-            working_targets = list(enabled_targets)
-
-        use_rise = sort_mode.value == "rise"
-        gen_status.value = "Generating..." + (" (sorting by rise time)" if use_rise else "")
-        page.update()
-
-        # Sort targets by selected order
-        sorted_targets = _sort_targets_by_rise_time(working_targets) if use_rise else working_targets
-
-        script = ""
         target_list = []
-        current_day = datetime.now().strftime("%Y-%m-%d")
+        scripts = {}  # program -> (fname, content)
 
-        for t in sorted_targets:
-            v1 = v2_to_v1_target(t)
-            # Convert RA/Dec to sexagesimal if given in decimal degrees
-            ra_hms = _ensure_hms(v1["RA"])
-            dec_dms = _ensure_dms(v1["Dec"])
-            # Sanitize name: keep only alphanumeric + hyphen
-            safe_name = _sanitize_name(v1["object name"])
-            if HAS_PLOTTING:
-                try:
-                    target_list.append(obs.create_ephem_target(t["name"], ra_hms, dec_dms))
-                except Exception:
-                    pass
-            # Insert note and program as ACP comment before this target's script
-            note = t.get("note", "").strip()
-            program = t.get("program", "").strip()
-            
-            if program and note:
-                script += f";{safe_name} Program {program}: {note}\n"
-            elif note:
-                script += f";{safe_name}: {note}\n"
-            if v1["Exp_By_Mag"] == "True":
-                script += tri.generate_script(
-                    safe_name, ra_hms, dec_dms, v1["Mag"],
-                    v1["Priority"], IS_LOT, v1["Repeat"], auto_exp=True)
-            else:
-                script += tri.generate_script(
-                    safe_name, ra_hms, dec_dms, v1["Mag"],
-                    v1["Priority"], IS_LOT, v1["Repeat"], auto_exp=False,
-                    filter_input=v1["Filter"], exp_time=v1["Exp_Time"],
-                    count=v1["Num_of_Frame"])
+        if telescope == "LOT":
+            programs = list(dict.fromkeys(
+                t.get("program", "").strip() for t in sorted_targets
+            ))
+            for prog in programs:
+                prog_targets = [t for t in sorted_targets if t.get("program", "").strip() == prog]
+                script = ""
+                for t in prog_targets:
+                    v1 = v2_to_v1_target(t)
+                    ra_hms  = _ensure_hms(v1["RA"])
+                    dec_dms = _ensure_dms(v1["Dec"])
+                    safe_name = _sanitize_name(v1["object name"])
+                    if HAS_PLOTTING:
+                        try:
+                            target_list.append(obs.create_ephem_target(t["name"], ra_hms, dec_dms))
+                        except Exception:
+                            pass
+                    comment = f";{safe_name} Program {prog}"
+                    note = t.get("note", "").strip()
+                    if note:
+                        comment += f": {note}"
+                    script += comment + "\n"
+                    if v1["Exp_By_Mag"] == "True":
+                        script += tri.generate_script(safe_name, ra_hms, dec_dms, v1["Mag"], v1["Priority"], IS_LOT, v1["Repeat"], auto_exp=True)
+                    else:
+                        script += tri.generate_script(safe_name, ra_hms, dec_dms, v1["Mag"], v1["Priority"], IS_LOT, v1["Repeat"], auto_exp=False, filter_input=v1["Filter"], exp_time=v1["Exp_Time"], count=v1["Num_of_Frame"])
+                fname = _script_filename(telescope, prog)
+                scripts[prog] = (fname, script)
+        else:
+            script = ""
+            for t in sorted_targets:
+                v1 = v2_to_v1_target(t)
+                ra_hms  = _ensure_hms(v1["RA"])
+                dec_dms = _ensure_dms(v1["Dec"])
+                safe_name = _sanitize_name(v1["object name"])
+                if HAS_PLOTTING:
+                    try:
+                        target_list.append(obs.create_ephem_target(t["name"], ra_hms, dec_dms))
+                    except Exception:
+                        pass
+                note = t.get("note", "").strip()
+                if note:
+                    script += f";{safe_name}: {note}\n"
+                if v1["Exp_By_Mag"] == "True":
+                    script += tri.generate_script(safe_name, ra_hms, dec_dms, v1["Mag"], v1["Priority"], IS_LOT, v1["Repeat"], auto_exp=True)
+                else:
+                    script += tri.generate_script(safe_name, ra_hms, dec_dms, v1["Mag"], v1["Priority"], IS_LOT, v1["Repeat"], auto_exp=False, filter_input=v1["Filter"], exp_time=v1["Exp_Time"], count=v1["Num_of_Frame"])
+            fname = _script_filename(telescope, "")
+            scripts[""] = (fname, script)
 
-        state["script"] = script
-        script_output.value = script
-
-        # Save script file with telescope/program name
-        fname = _script_filename(telescope, program)
-        script_full = os.path.join(_get_data_path(), fname)
-        state["last_script_path"] = script_full
-        try:
-            with open(script_full, "w", encoding="utf-8") as f:
-                f.write(script)
-        except Exception:
-            pass
-
-        # Generate plot
+        img_path = None
         if HAS_PLOTTING and target_list:
             try:
                 plot_dir = os.path.join(_get_data_path(), "plot")
                 os.makedirs(plot_dir, exist_ok=True)
-                plot_name = f"obv_plot_{telescope}_{program}.jpg" if program else f"obv_plot_{telescope}.jpg"
-                plot_dst = os.path.join(plot_dir, plot_name)
+                plot_dst = os.path.join(plot_dir, f"obv_plot_{telescope}.jpg")
                 img_path = tri.generate_img(current_day, target_list, plot_path=plot_dst)
-                state["img_path"] = img_path
-                obs_image.src = img_path
-                obs_image.visible = True
-            except Exception as ex:
-                gen_status.value = f"Plot error: {ex}"
-                obs_image.visible = False
-        else:
-            obs_image.visible = False
+            except Exception:
+                pass
+        return scripts, img_path
 
-        gen_status.value = f"Done \u2014 {len(sorted_targets)} targets \u2192 saved to {fname}"
-        page.update()
-        _append_app_log("Generate", f"Done: {len(sorted_targets)} targets saved to {fname}")
-        snack(f"Script generated and saved to {fname}!")
-        _set_busy(False)
+    def _on_generate(e):
+        _set_busy(True, "Generating scripts...")
+        _append_app_log("Generate", "Start generate for SLT & LOT")
+
+        def _worker():
+            mode = sort_mode.value
+            gen_status.value = "Generating..." + {
+                "rise": " (rise time order)",
+                "priority": " (priority order)",
+            }.get(mode, "")
+            page.update()
+            current_day = datetime.now().strftime("%Y-%m-%d")
+            summary = []
+
+            # ── SLT ──
+            slt_targets = [t for t in state["all_targets"].get("SLT", []) if t.get("enabled", True)]
+            sorted_slt = _sort_targets(slt_targets)
+            slt_scripts, slt_img = _generate_one("SLT", sorted_slt, current_day)
+            _, slt_content = next(iter(slt_scripts.values()), ("", ""))
+            state["script"] = slt_content
+            script_output_slt.value = slt_content
+            for prog, (fname, content) in slt_scripts.items():
+                fp = os.path.join(_get_data_path(), fname)
+                state["last_script_path"] = fp
+                try:
+                    with open(fp, "w", encoding="utf-8") as f:
+                        f.write(content)
+                except Exception:
+                    pass
+                summary.append(fname)
+            if slt_img:
+                obs_image_slt.src = slt_img
+                obs_image_slt.visible = True
+            else:
+                obs_image_slt.visible = False
+
+            # ── LOT ──
+            lot_targets = [t for t in state["all_targets"].get("LOT", []) if t.get("enabled", True)]
+            sorted_lot = _sort_targets(lot_targets)
+            lot_scripts, lot_img = _generate_one("LOT", sorted_lot, current_day)
+
+            # Rebuild LOT script column
+            lot_script_col.controls.clear()
+            for prog, (fname, content) in lot_scripts.items():
+                fp = os.path.join(_get_data_path(), fname)
+                try:
+                    with open(fp, "w", encoding="utf-8") as f:
+                        f.write(content)
+                except Exception:
+                    pass
+                summary.append(fname)
+                lot_script_col.controls.append(
+                    ft.Text(fname, size=13, weight=ft.FontWeight.BOLD, color=ft.Colors.GREEN_300)
+                )
+                lot_script_col.controls.append(
+                    ft.TextField(
+                        value=content, multiline=True,
+                        min_lines=10, max_lines=25, read_only=True,
+                        text_size=11, text_style=ft.TextStyle(font_family="Courier New"),
+                        expand=True,
+                    )
+                )
+            if lot_img:
+                obs_image_lot.src = lot_img
+                obs_image_lot.visible = True
+            else:
+                obs_image_lot.visible = False
+
+            gen_status.value = f"Done \u2014 saved: {', '.join(summary) or 'nothing'}"
+            _append_app_log("Generate", f"Done: {', '.join(summary)}")
+            snack("Scripts generated!")
+            _set_busy(False)
+
+        page.run_thread(_worker)
 
     def _on_copy_script(e):
         _set_busy(True, "Copying script...", e.control)
@@ -1466,25 +1536,39 @@ def main(page: ft.Page):
         ft.Text("Script Generator", size=28, weight=ft.FontWeight.BOLD),
         ft.Divider(),
         ft.Row([
-            gen_telescope_dd,
-            gen_program_dd,
-            ft.Container(width=10),
             ft.Text("Sort:", size=14, weight=ft.FontWeight.W_500),
             sort_mode,
-        ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-        ft.Row([
-            ft.Button("Generate Script", icon=ft.Icons.PLAY_ARROW, on_click=_on_generate,
+            ft.Container(expand=True),
+            ft.Button("Generate All Scripts", icon=ft.Icons.PLAY_ARROW, on_click=_on_generate,
                       style=ft.ButtonStyle(bgcolor=ft.Colors.BLUE_700, color=ft.Colors.WHITE)),
-            # ft.Button("Copy to Clipboard", icon=ft.Icons.COPY, on_click=_on_copy_script),
-        ], spacing=12),
+        ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
         gen_status,
+        ft.Divider(),
         ft.Row([
-            script_output,
+            # Left: SLT
             ft.Column([
-                ft.Text("Object Visibility", size=16, weight=ft.FontWeight.W_500),
-                obs_image,
-            ], spacing=8, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
-        ], spacing=16, expand=True, vertical_alignment=ft.CrossAxisAlignment.START),
+                ft.Row([
+                    ft.Icon(ft.Icons.RADIO_BUTTON_CHECKED, size=14, color=ft.Colors.BLUE_300),
+                    ft.Text("SLT", size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.BLUE_300),
+                ], spacing=6),
+                ft.Divider(height=1),
+                script_output_slt,
+                ft.Text("Object Visibility", size=14, weight=ft.FontWeight.W_500),
+                obs_image_slt,
+            ], expand=True, spacing=8),
+            ft.VerticalDivider(width=1),
+            # Right: LOT
+            ft.Column([
+                ft.Row([
+                    ft.Icon(ft.Icons.RADIO_BUTTON_CHECKED, size=14, color=ft.Colors.GREEN_300),
+                    ft.Text("LOT", size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.GREEN_300),
+                ], spacing=6),
+                ft.Divider(height=1),
+                lot_script_col,
+                ft.Text("Object Visibility", size=14, weight=ft.FontWeight.W_500),
+                obs_image_lot,
+            ], expand=True, spacing=8, scroll=ft.ScrollMode.AUTO),
+        ], expand=True, spacing=0, vertical_alignment=ft.CrossAxisAlignment.START),
     ], spacing=10, expand=True))
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -1691,6 +1775,7 @@ def main(page: ft.Page):
                                 "trigger_filter": formatted_filters if formatted_filters else "",
                                 "trigger_exp": None,
                                 "trigger_count": None,
+                                "repeat_count": t.get("repeat", 0),
                                 "is_observed": False,
                                 "observed_filter": None,
                                 "observed_exp": None,
@@ -1734,12 +1819,18 @@ def main(page: ft.Page):
                 send_progress.visible = False
                 page.update()
 
-        threading.Thread(target=_send_worker, daemon=True).start()
+        page.run_thread(_send_worker)
 
     send_btn.on_click = lambda e: _on_send_click(e)
 
     confirm_targets_title = ft.Text("Targets to send", weight=ft.FontWeight.W_600)
-    confirm_targets_list = ft.Column(spacing=4, scroll=ft.ScrollMode.AUTO, height=220)
+    confirm_targets_list = ft.Column(spacing=4, scroll=ft.ScrollMode.AUTO, height=200)
+    confirm_message_preview = ft.TextField(
+        label="Message preview",
+        multiline=True, min_lines=4, max_lines=6,
+        read_only=True, text_size=12,
+        text_style=ft.TextStyle(font_family="Courier New"),
+    )
 
     def _prepare_confirm_targets():
         sf = state.get("last_script_path", "")
@@ -1747,6 +1838,7 @@ def main(page: ft.Page):
             sf = os.path.join(_get_data_path(), send_script_dd.value)
 
         confirm_targets_list.controls.clear()
+        confirm_message_preview.value = send_message_field.value.strip()
         if not sf or not os.path.exists(sf):
             confirm_targets_title.value = "Targets to send (no script loaded)"
             return False
@@ -1788,7 +1880,10 @@ def main(page: ft.Page):
         content=ft.Container(
             width=700,
             content=ft.Column([
-                ft.Text("Please double check target list before sending."),
+                ft.Text("Please double check before sending."),
+                ft.Text("Message", weight=ft.FontWeight.W_600),
+                confirm_message_preview,
+                ft.Divider(height=8),
                 confirm_targets_title,
                 ft.Container(
                     border=ft.Border.all(1, ft.Colors.GREY_700),
@@ -1796,8 +1891,9 @@ def main(page: ft.Page):
                     padding=10,
                     content=confirm_targets_list,
                 ),
-            ], spacing=8),
+            ], spacing=8, scroll=ft.ScrollMode.AUTO),
         ),
+        content_padding=ft.Padding.all(24),
         actions=[
             ft.TextButton("Cancel", on_click=_on_cancel_send),
             ft.Button("Yes, Send", on_click=_on_confirm_send,
@@ -2118,12 +2214,10 @@ def main(page: ft.Page):
         elif idx == 1:
             set_data_path_label.value = _get_data_path()
         elif idx == 2:
-            home_telescope_dd.value = state["telescope"]
             data_path_label.value = _get_data_path()
-            auto_save_label.value = f"Auto-saved to {os.path.basename(_json_path(state['telescope']))}"
+            auto_save_label.value = "Auto-saved (SLT & LOT)"
         elif idx == 3:
-            gen_telescope_dd.value = state["telescope"]
-            gen_program_dd.visible = state["telescope"] == "LOT"
+            pass  # script_view needs no refresh
         elif idx == 4:
             _refresh_script_list()
         elif idx == 5:
@@ -2132,6 +2226,8 @@ def main(page: ft.Page):
         page.update()
 
     def on_nav(e):
+        if not _busy_stop.is_set():
+            return
         if update_gate["required"]:
             force_update_dlg.open = True
             snack("Update required. Please download the latest version.", ft.Colors.ORANGE)
@@ -2178,9 +2274,15 @@ def main(page: ft.Page):
 
     if is_mobile:
         page.navigation_bar = nav_bar
-        page.add(ft.Container(content=content_area, expand=True))
+        page.add(ft.Stack([
+            ft.Container(content=content_area, expand=True),
+            busy_overlay,
+        ], expand=True))
     else:
-        page.add(ft.Row([nav_rail, ft.VerticalDivider(width=1), content_area], expand=True))
+        page.add(ft.Stack([
+            ft.Row([nav_rail, ft.VerticalDivider(width=1), content_area], expand=True),
+            busy_overlay,
+        ], expand=True))
 
 
 if __name__ == "__main__":
